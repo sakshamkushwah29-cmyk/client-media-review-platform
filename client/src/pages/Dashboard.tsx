@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react';
 import { Project } from '../types';
 import { api } from '../services/api';
 import { StorageMeter } from '../components/StorageMeter';
@@ -131,10 +132,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectProject }) => {
           </div>
         </div>
 
-        {/* Right Actions: Members & + New Project Button */}
+        {/* Right Actions: Members, Clerk User Controls, & + New Project Button */}
         <div className="flex items-center gap-2">
+          {/* Clerk Auth Controls */}
+          <Show when="signed-in">
+            <div className="flex items-center bg-[#141724] border border-[#23283b] rounded-xl px-2 py-1">
+              <UserButton showName />
+            </div>
+          </Show>
+
+          <Show when="signed-out">
+            <div className="flex items-center gap-1.5">
+              <SignInButton mode="modal">
+                <button className="px-3 py-1.5 rounded-xl bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold hover:bg-indigo-600 hover:text-white transition-all cursor-pointer">
+                  Sign In
+                </button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 transition-all cursor-pointer">
+                  Sign Up
+                </button>
+              </SignUpButton>
+            </div>
+          </Show>
+
           <button
-            className="p-2 rounded-xl bg-[#141724] border border-[#23283b] text-slate-400 hover:text-white transition-colors"
+            className="p-2 rounded-xl bg-[#141724] border border-[#23283b] text-slate-400 hover:text-white transition-colors cursor-pointer"
             title="Manage Team"
           >
             <Users className="w-4 h-4" />

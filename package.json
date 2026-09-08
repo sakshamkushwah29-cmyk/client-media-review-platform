@@ -12,6 +12,8 @@
     "start": "bun run server/src/index.ts"
   },
   "dependencies": {
+    "@clerk/react": "^6.15.1",
+    "@clerk/themes": "^2.4.57",
     "bcryptjs": "^3.0.3",
     "canvas-confetti": "^1.9.4",
     "cors": "^2.8.6",

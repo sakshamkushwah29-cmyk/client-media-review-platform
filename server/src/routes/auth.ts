@@ -154,4 +154,86 @@ router.get('/me', requireStaffAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Clerk user session sync
+router.post('/clerk-sync', async (req: Request, res: Response) => {
+  try {
+    const { email, fullName, clerkId } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanName = fullName && fullName.trim() ? fullName.trim() : cleanEmail.split('@')[0];
+
+    // Find existing profile
+    let profile = db.query(`
+      SELECT p.id, p.organization_id, p.full_name, p.email, p.role, o.name as org_name
+      FROM profiles p
+      JOIN organizations o ON p.organization_id = o.id
+      WHERE p.email = ?
+    `).get(cleanEmail) as any;
+
+    if (!profile) {
+      // Find primary organization or create one
+      let org = db.query('SELECT id, name FROM organizations ORDER BY created_at ASC LIMIT 1').get() as any;
+      const now = new Date().toISOString();
+      let orgId: string;
+      let orgName: string;
+
+      if (!org) {
+        orgId = crypto.randomUUID();
+        orgName = `${cleanName}'s Studio`;
+        const rootFolderId = `gdrive_root_${crypto.randomBytes(8).toString('hex')}`;
+        db.run(`
+          INSERT INTO organizations (id, name, drive_root_folder_id, storage_quota_bytes, storage_used_bytes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [orgId, orgName, rootFolderId, CONFIG.DEFAULT_QUOTA_BYTES, 0, now]);
+      } else {
+        orgId = org.id;
+        orgName = org.name;
+      }
+
+      const userId = crypto.randomUUID();
+      const dummyPasswordHash = await hashPassword(crypto.randomUUID());
+      const role = 'owner';
+
+      db.run(`
+        INSERT INTO profiles (id, organization_id, full_name, email, password_hash, role, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [userId, orgId, cleanName, cleanEmail, dummyPasswordHash, role, now]);
+
+      profile = {
+        id: userId,
+        organization_id: orgId,
+        full_name: cleanName,
+        email: cleanEmail,
+        role,
+        org_name: orgName,
+      };
+    }
+
+    const token = signJwt({
+      id: profile.id,
+      email: profile.email,
+      organizationId: profile.organization_id,
+      role: profile.role,
+    });
+
+    return res.json({
+      token,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        fullName: profile.full_name,
+        role: profile.role,
+        organizationId: profile.organization_id,
+        organizationName: profile.org_name,
+      },
+    });
+  } catch (err: any) {
+    console.error('Clerk sync error:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
 export default router;

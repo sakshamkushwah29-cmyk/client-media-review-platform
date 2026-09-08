@@ -1,4 +1,5 @@
 import React from 'react';
+import { Show, UserButton, SignInButton } from '@clerk/react';
 import { useAuth } from '../context/AuthContext';
 import {
   Home,
@@ -104,16 +105,27 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({ currentView, onNavigat
           <Lightbulb className="w-4 h-4" />
         </button>
 
-        {/* User Avatar with Green Active Dot */}
-        <div className="relative group/user mt-1">
-          <button
-            onClick={logout}
-            className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shadow-md cursor-pointer hover:bg-rose-600 transition-colors"
-            title={`${user?.fullName} (${user?.role}) - Click to sign out`}
-          >
-            {getInitials(user?.fullName)}
-          </button>
-          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0a0c13]" />
+        {/* User Avatar / Clerk UserButton with Green Active Dot */}
+        <div className="relative group/user mt-1 flex items-center justify-center">
+          <Show when="signed-in">
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: 'w-8 h-8 rounded-lg ring-2 ring-emerald-500/50',
+                },
+              }}
+            />
+          </Show>
+          <Show when="signed-out">
+            <button
+              onClick={logout}
+              className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shadow-md cursor-pointer hover:bg-rose-600 transition-colors"
+              title={`${user?.fullName || 'User'} (${user?.role || 'Staff'}) - Click to sign out`}
+            >
+              {getInitials(user?.fullName)}
+            </button>
+          </Show>
+          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0a0c13] pointer-events-none" />
         </div>
       </div>
     </aside>

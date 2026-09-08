@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useUser, useClerk } from '@clerk/react';
 import { User, OrganizationUsage } from '../types';
 import { api, setAuthToken } from '../services/api';
 
@@ -15,6 +16,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isLoaded: isClerkLoaded, isSignedIn, user: clerkUser } = useUser();
+  const clerk = useClerk();
+
   const [user, setUser] = useState<User | null>(null);
   const [usage, setUsage] = useState<OrganizationUsage | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -28,8 +32,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Sync Clerk authenticated user with platform backend
+  useEffect(() => {
+    const syncClerk = async () => {
+      if (!isClerkLoaded) return;
+
+      if (isSignedIn && clerkUser) {
+        const primaryEmail = clerkUser.primaryEmailAddress?.emailAddress || '';
+        const fullName = clerkUser.fullName || `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || 'Clerk User';
+
+        try {
+          const res = await api.syncClerkUser({
+            email: primaryEmail,
+            fullName,
+            clerkId: clerkUser.id,
+          });
+          setAuthToken(res.token);
+          setUser(res.user);
+          await refreshUsage();
+        } catch (err) {
+          console.error('Failed to sync Clerk user with backend', err);
+        }
+      }
+      setLoading(false);
+    };
+
+    syncClerk();
+  }, [isClerkLoaded, isSignedIn, clerkUser]);
+
+  // Fallback / legacy local auth restore if not signed in with Clerk
   useEffect(() => {
     const initAuth = async () => {
+      if (user) return;
       const token = localStorage.getItem('auth_token');
       if (token) {
         try {
@@ -42,11 +76,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(null);
         }
       }
-      setLoading(false);
+      if (isClerkLoaded) {
+        setLoading(false);
+      }
     };
 
     initAuth();
-  }, []);
+  }, [isClerkLoaded, user]);
 
   const login = async (email: string, pass: string) => {
     const res = await api.login({ email, password: pass });
@@ -66,10 +102,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthToken(null);
     setUser(null);
     setUsage(null);
+    if (isSignedIn) {
+      clerk.signOut().catch(() => {});
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, usage, loading, login, register, logout, refreshUsage }}>
+    <AuthContext.Provider value={{ user, usage, loading: loading && !isClerkLoaded, login, register, logout, refreshUsage }}>
       {children}
     </AuthContext.Provider>
   );

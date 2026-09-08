@@ -56,6 +56,8 @@ export const api = {
   // Auth
   login: (data: any) => request<{ token: string; user: User }>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
   register: (data: any) => request<{ token: string; user: User }>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  syncClerkUser: (data: { email: string; fullName?: string; clerkId: string }) =>
+    request<{ token: string; user: User }>('/auth/clerk-sync', { method: 'POST', body: JSON.stringify(data) }),
   getMe: () => request<{ user: User }>('/auth/me'),
 
   // Org & Storage Quota
