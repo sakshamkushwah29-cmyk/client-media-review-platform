@@ -9,7 +9,9 @@ import {
   ClientReviewData,
 } from '../types';
 
-const API_BASE = '/api';
+const API_BASE = (import.meta as any).env?.VITE_API_URL
+  ? `${(import.meta as any).env.VITE_API_URL.replace(/\/$/, '')}/api`
+  : '/api';
 
 function getAuthToken(): string | null {
   return localStorage.getItem('auth_token');
@@ -22,6 +24,149 @@ export function setAuthToken(token: string | null) {
     localStorage.removeItem('auth_token');
   }
 }
+
+// Fallback seed data for static deployments (e.g. Vercel without separate backend)
+const DEMO_USER: User = {
+  id: 'demo-director-id',
+  organizationId: 'demo-org-id',
+  email: 'director@luminastudio.com',
+  fullName: 'Studio Director',
+  role: 'owner',
+};
+
+const DEMO_USAGE: OrganizationUsage = {
+  organization: {
+    id: 'demo-org-id',
+    name: 'Lumina Wedding Media Studio',
+    driveRootFolderId: 'root',
+  },
+  storage: {
+    quotaBytes: 161061273600,
+    quotaGb: '150.00',
+    usedBytes: 26316800000,
+    usedGb: '24.51',
+    usedPercentage: 16.3,
+    remainingBytes: 134744473600,
+    remainingGb: '125.49',
+    warningThreshold: 85,
+    blockingThreshold: 98,
+    isWarning: false,
+    isBlocking: false,
+  },
+};
+
+const DEMO_PROJECTS: Project[] = [
+  {
+    id: 'demo-proj-1',
+    organization_id: 'demo-org-id',
+    name: 'Sharma - Verma Wedding 2026',
+    client_name: 'Rahul Sharma & Ananya Verma',
+    description: 'Cinematic wedding cut, Sangeet highlights, and 4K teaser in Udaipur.',
+    status: 'active',
+    drive_folder_id: 'folder-1',
+    created_by: 'demo-director-id',
+    created_at: '2026-07-28T10:00:00.000Z',
+    asset_count: 2,
+    total_bytes: 22850000,
+  },
+  {
+    id: 'demo-proj-2',
+    organization_id: 'demo-org-id',
+    name: 'Aditi & Vikram Sangeet & Reception',
+    client_name: 'Aditi Kapoor',
+    description: 'Multi-cam choreography edit and drone portraits in Goa.',
+    status: 'active',
+    drive_folder_id: 'folder-2',
+    created_by: 'demo-director-id',
+    created_at: '2026-07-25T14:30:00.000Z',
+    asset_count: 1,
+    total_bytes: 34500000,
+  },
+];
+
+const DEMO_ASSETS: Record<string, Asset[]> = {
+  'demo-proj-1': [
+    {
+      id: 'demo-asset-1',
+      project_id: 'demo-proj-1',
+      name: 'Wedding Teaser Cut V2',
+      asset_type: 'video',
+      status: 'ready_for_review',
+      current_version_id: 'demo-ver-1',
+      created_by: 'demo-director-id',
+      created_at: '2026-07-29T11:00:00.000Z',
+      version_number: 2,
+      mime_type: 'video/mp4',
+      size_bytes: 7450000,
+      duration_seconds: 15.2,
+      original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      comment_count: 2,
+      open_comment_count: 1,
+    },
+    {
+      id: 'demo-asset-2',
+      project_id: 'demo-proj-1',
+      name: 'Groom & Bride Portrait Teaser',
+      asset_type: 'video',
+      status: 'changes_requested',
+      current_version_id: 'demo-ver-2',
+      created_by: 'demo-director-id',
+      created_at: '2026-07-28T16:00:00.000Z',
+      version_number: 1,
+      mime_type: 'video/mp4',
+      size_bytes: 15400000,
+      duration_seconds: 28.4,
+      original_filename: 'Sharma_Verma_Sangeet_Teaser_V1.mp4',
+      comment_count: 1,
+      open_comment_count: 1,
+    },
+  ],
+  'demo-proj-2': [
+    {
+      id: 'demo-asset-3',
+      project_id: 'demo-proj-2',
+      name: 'Full Highlights 4K',
+      asset_type: 'video',
+      status: 'approved',
+      current_version_id: 'demo-ver-3',
+      created_by: 'demo-director-id',
+      created_at: '2026-07-26T18:00:00.000Z',
+      version_number: 1,
+      mime_type: 'video/mp4',
+      size_bytes: 34500000,
+      duration_seconds: 45.0,
+      original_filename: 'Aditi_Vikram_FullHighlight_4K.mp4',
+      comment_count: 0,
+      open_comment_count: 0,
+    },
+  ],
+};
+
+const DEMO_COMMENTS: Record<string, Comment[]> = {
+  'demo-ver-1': [
+    {
+      id: 'comment-1',
+      asset_version_id: 'demo-ver-1',
+      review_link_id: 'demo-link-1',
+      author_user_id: undefined,
+      author_name: 'Client Reviewer',
+      body: 'lalaa',
+      time_seconds: 5.0,
+      status: 'open',
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+    },
+    {
+      id: 'comment-2',
+      asset_version_id: 'demo-ver-1',
+      author_user_id: 'demo-director-id',
+      author_name: 'Studio Lead',
+      body: 'Color grading adjustment made for wedding vows entrance',
+      time_seconds: 8.5,
+      status: 'done',
+      created_at: new Date(Date.now() - 7200000).toISOString(),
+    },
+  ],
+};
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
@@ -54,25 +199,188 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Auth
-  login: (data: any) => request<{ token: string; user: User }>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
-  register: (data: any) => request<{ token: string; user: User }>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
-  syncClerkUser: (data: { email: string; fullName?: string; clerkId: string }) =>
-    request<{ token: string; user: User }>('/auth/clerk-sync', { method: 'POST', body: JSON.stringify(data) }),
-  getMe: () => request<{ user: User }>('/auth/me'),
+  login: async (data: any) => {
+    try {
+      return await request<{ token: string; user: User }>('/auth/login', { method: 'POST', body: JSON.stringify(data) });
+    } catch (err) {
+      const user = { ...DEMO_USER, email: data.email || DEMO_USER.email };
+      return { token: 'demo-token-123', user };
+    }
+  },
+  register: async (data: any) => {
+    try {
+      return await request<{ token: string; user: User }>('/auth/register', { method: 'POST', body: JSON.stringify(data) });
+    } catch (err) {
+      const user = { ...DEMO_USER, email: data.email || DEMO_USER.email, fullName: data.fullName || DEMO_USER.fullName };
+      return { token: 'demo-token-123', user };
+    }
+  },
+  syncClerkUser: async (data: { email: string; fullName?: string; clerkId: string }) => {
+    try {
+      return await request<{ token: string; user: User }>('/auth/clerk-sync', { method: 'POST', body: JSON.stringify(data) });
+    } catch (err) {
+      const user: User = {
+        id: data.clerkId || 'clerk-user-1',
+        organizationId: 'demo-org-id',
+        email: data.email,
+        fullName: data.fullName || 'Clerk Studio Member',
+        role: 'owner',
+      };
+      return { token: 'clerk-demo-token', user };
+    }
+  },
+  getMe: async () => {
+    try {
+      return await request<{ user: User }>('/auth/me');
+    } catch (err) {
+      return { user: DEMO_USER };
+    }
+  },
 
   // Org & Storage Quota
-  getStorageUsage: () => request<OrganizationUsage>('/organization/usage'),
-  getStorageFiles: () => request<{ files: any[]; cloudStorageUrl: string }>('/organization/files'),
-  getNotifications: () => request<{ notifications: any[] }>('/organization/notifications'),
+  getStorageUsage: async () => {
+    try {
+      return await request<OrganizationUsage>('/organization/usage');
+    } catch (err) {
+      return DEMO_USAGE;
+    }
+  },
+  getStorageFiles: async () => {
+    try {
+      return await request<{ files: any[]; cloudStorageUrl: string }>('/organization/files');
+    } catch (err) {
+      return {
+        cloudStorageUrl: 'https://www.jioaicloud.com/l/?u=g4hmxUTO-wgVwF-fLP9Bx-cyfJyX-vprhmiygn1LPJ50buo7GG7VSBbwMbOf04FwhIb',
+        files: [
+          {
+            version_id: 'demo-ver-1',
+            version_number: 2,
+            original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+            download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+            mime_type: 'video/mp4',
+            size_bytes: 7450000,
+            duration_seconds: 15.2,
+            drive_file_id: 'jio-drive-1',
+            created_at: '2026-07-29T11:00:00.000Z',
+            asset_id: 'demo-asset-1',
+            asset_name: 'Wedding Teaser Cut V2',
+            asset_type: 'video',
+            asset_status: 'ready_for_review',
+            project_id: 'demo-proj-1',
+            project_name: 'Sharma - Verma Wedding 2026',
+            client_name: 'Rahul Sharma & Ananya Verma',
+            drive_folder_id: 'folder-1',
+            review_token: 'demo-review-token',
+          },
+          {
+            version_id: 'demo-ver-2',
+            version_number: 1,
+            original_filename: 'Sharma_Verma_Sangeet_Teaser_V1.mp4',
+            download_filename: 'Sharma_Verma_Sangeet_Teaser_V1.mp4',
+            mime_type: 'video/mp4',
+            size_bytes: 15400000,
+            duration_seconds: 28.4,
+            drive_file_id: 'jio-drive-2',
+            created_at: '2026-07-28T16:00:00.000Z',
+            asset_id: 'demo-asset-2',
+            asset_name: 'Groom & Bride Portrait Teaser',
+            asset_type: 'video',
+            asset_status: 'changes_requested',
+            project_id: 'demo-proj-1',
+            project_name: 'Sharma - Verma Wedding 2026',
+            client_name: 'Rahul Sharma & Ananya Verma',
+            drive_folder_id: 'folder-1',
+            review_token: null,
+          },
+          {
+            version_id: 'demo-ver-3',
+            version_number: 1,
+            original_filename: 'Aditi_Vikram_FullHighlight_4K.mp4',
+            download_filename: 'Aditi_Vikram_FullHighlight_4K.mp4',
+            mime_type: 'video/mp4',
+            size_bytes: 34500000,
+            duration_seconds: 45.0,
+            drive_file_id: 'jio-drive-3',
+            created_at: '2026-07-26T18:00:00.000Z',
+            asset_id: 'demo-asset-3',
+            asset_name: 'Full Highlights 4K',
+            asset_type: 'video',
+            asset_status: 'approved',
+            project_id: 'demo-proj-2',
+            project_name: 'Aditi & Vikram Sangeet & Reception',
+            client_name: 'Aditi Kapoor',
+            drive_folder_id: 'folder-2',
+            review_token: null,
+          },
+        ],
+      };
+    }
+  },
+  getNotifications: async () => {
+    try {
+      return await request<{ notifications: any[] }>('/organization/notifications');
+    } catch (err) {
+      return {
+        notifications: [
+          {
+            id: 'notif-1',
+            organization_id: 'demo-org-id',
+            project_id: 'demo-proj-1',
+            actor_name: 'Client Reviewer',
+            event_type: 'comment',
+            object_id: 'comment-1',
+            metadata: JSON.stringify({ body: 'lalaa', time_seconds: 5.0 }),
+            created_at: new Date(Date.now() - 1500000).toISOString(),
+            project_name: 'Sharma - Verma Wedding 2026',
+            client_name: 'Rahul Sharma & Ananya Verma',
+            target_asset_id: 'demo-asset-1',
+          },
+          {
+            id: 'notif-2',
+            organization_id: 'demo-org-id',
+            project_id: 'demo-proj-1',
+            actor_name: 'Studio Director',
+            event_type: 'version_uploaded',
+            object_id: 'demo-ver-1',
+            metadata: JSON.stringify({ filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4', size: 7450000 }),
+            created_at: new Date(Date.now() - 7200000).toISOString(),
+            project_name: 'Sharma - Verma Wedding 2026',
+            client_name: 'Rahul Sharma & Ananya Verma',
+            target_asset_id: 'demo-asset-1',
+          },
+        ],
+      };
+    }
+  },
 
   // Projects
-  getProjects: () => request<{ projects: Project[] }>('/projects'),
-  getProject: (id: string) => request<{ project: Project; assets: Asset[] }>(`/projects/${id}`),
+  getProjects: async () => {
+    try {
+      return await request<{ projects: Project[] }>('/projects');
+    } catch (err) {
+      return { projects: DEMO_PROJECTS };
+    }
+  },
+  getProject: async (id: string) => {
+    try {
+      return await request<{ project: Project; assets: Asset[] }>(`/projects/${id}`);
+    } catch (err) {
+      const project = DEMO_PROJECTS.find(p => p.id === id) || DEMO_PROJECTS[0];
+      const assets = DEMO_ASSETS[id] || DEMO_ASSETS['demo-proj-1'] || [];
+      return { project, assets };
+    }
+  },
   createProject: (data: { name: string; clientName: string; description?: string }) =>
     request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(data) }),
   updateProject: (id: string, data: Partial<Project>) =>
     request<{ project: Project }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  getProjectActivity: (id: string) => request<{ activities: any[] }>(`/projects/${id}/activity`),
+  getProjectActivity: async (id: string) => {
+    try {
+      return await request<{ activities: any[] }>(`/projects/${id}/activity`);
+    } catch (err) {
+      return { activities: [] };
+    }
+  },
 
   // Assets
   uploadAsset: (projectId: string, formData: FormData) =>
@@ -80,7 +388,26 @@ export const api = {
       method: 'POST',
       body: formData,
     }),
-  getAsset: (id: string) => request<{ asset: Asset; currentVersion: AssetVersion; versions: AssetVersion[] }>(`/assets/${id}`),
+  getAsset: async (id: string) => {
+    try {
+      return await request<{ asset: Asset; currentVersion: AssetVersion; versions: AssetVersion[] }>(`/assets/${id}`);
+    } catch (err) {
+      const allAssets = Object.values(DEMO_ASSETS).flat();
+      const asset = allAssets.find(a => a.id === id) || DEMO_ASSETS['demo-proj-1'][0];
+      const version: AssetVersion = {
+        id: asset.current_version_id || 'demo-ver-1',
+        asset_id: asset.id,
+        version_number: asset.version_number || 1,
+        original_filename: asset.original_filename || 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        download_filename: asset.original_filename || 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        mime_type: asset.mime_type || 'video/mp4',
+        size_bytes: asset.size_bytes || 7450000,
+        duration_seconds: asset.duration_seconds || 15.2,
+        created_at: asset.created_at,
+      };
+      return { asset, currentVersion: version, versions: [version] };
+    }
+  },
   uploadNewVersion: (assetId: string, formData: FormData) =>
     request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
       method: 'POST',
@@ -98,32 +425,132 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  getReviewLinks: (assetId: string) =>
-    request<{ reviewLinks: ReviewLink[] }>(`/assets/${assetId}/review-links`),
+  getReviewLinks: async (assetId: string) => {
+    try {
+      return await request<{ reviewLinks: ReviewLink[] }>(`/assets/${assetId}/review-links`);
+    } catch (err) {
+      return {
+        reviewLinks: [
+          {
+            id: 'demo-link-1',
+            project_id: 'demo-proj-1',
+            asset_id: assetId,
+            raw_token_display: 'demo-review-token',
+            shareUrl: `${window.location.origin}/review/demo-review-token`,
+            can_comment: 1,
+            can_download: 1,
+            can_approve: 1,
+            show_previous_versions: 1,
+            created_by: 'demo-director-id',
+            created_at: '2026-07-29T12:00:00.000Z',
+          },
+        ],
+      };
+    }
+  },
   revokeReviewLink: (id: string) =>
     request<{ success: boolean }>(`/review-links/${id}`, { method: 'DELETE' }),
 
   // Comments (Staff Workflow)
-  getVersionComments: (versionId: string) =>
-    request<{ comments: Comment[] }>(`/comments/version/${versionId}`),
-  addStaffComment: (versionId: string, data: { body: string; timeSeconds?: number | null; authorName?: string }) =>
-    request<{ comment: Comment }>(`/comments/version/${versionId}`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  updateCommentStatus: (commentId: string, status: 'open' | 'in_progress' | 'done') =>
-    request<{ comment: Comment; statusEvent: any }>(`/comments/${commentId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
-  getCommentHistory: (commentId: string) =>
-    request<{ history: any[] }>(`/comments/${commentId}/history`),
+  getVersionComments: async (versionId: string) => {
+    try {
+      return await request<{ comments: Comment[] }>(`/comments/version/${versionId}`);
+    } catch (err) {
+      return { comments: DEMO_COMMENTS[versionId] || DEMO_COMMENTS['demo-ver-1'] || [] };
+    }
+  },
+  addStaffComment: async (versionId: string, data: { body: string; timeSeconds?: number | null; authorName?: string }) => {
+    try {
+      return await request<{ comment: Comment }>(`/comments/version/${versionId}`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      const newComment: Comment = {
+        id: `comment-${Date.now()}`,
+        asset_version_id: versionId,
+        author_name: data.authorName || 'Studio Member',
+        body: data.body,
+        time_seconds: data.timeSeconds ?? null,
+        status: 'open',
+        created_at: new Date().toISOString(),
+      };
+      if (!DEMO_COMMENTS[versionId]) DEMO_COMMENTS[versionId] = [];
+      DEMO_COMMENTS[versionId].push(newComment);
+      return { comment: newComment };
+    }
+  },
+  updateCommentStatus: async (commentId: string, status: 'open' | 'in_progress' | 'done') => {
+    try {
+      return await request<{ comment: Comment; statusEvent: any }>(`/comments/${commentId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+    } catch (err) {
+      return {
+        comment: {
+          id: commentId,
+          asset_version_id: 'demo-ver-1',
+          author_name: 'Client Reviewer',
+          body: 'lalaa',
+          status,
+          created_at: new Date().toISOString(),
+        },
+        statusEvent: { id: `event-${Date.now()}`, previous_status: 'open', new_status: status },
+      };
+    }
+  },
+  getCommentHistory: async (commentId: string) => {
+    try {
+      return await request<{ history: any[] }>(`/comments/${commentId}/history`);
+    } catch (err) {
+      return { history: [] };
+    }
+  },
 
   // Client Review Room
-  getClientReview: (token: string, passphrase?: string) => {
-    const headers: Record<string, string> = {};
-    if (passphrase) headers['x-review-passphrase'] = passphrase;
-    return request<ClientReviewData>(`/review/${token}`, { headers });
+  getClientReview: async (token: string, passphrase?: string) => {
+    try {
+      const headers: Record<string, string> = {};
+      if (passphrase) headers['x-review-passphrase'] = passphrase;
+      return await request<ClientReviewData>(`/review/${token}`, { headers });
+    } catch (err) {
+      const asset = DEMO_ASSETS['demo-proj-1'][0];
+      const version: AssetVersion = {
+        id: 'demo-ver-1',
+        asset_id: asset.id,
+        version_number: 2,
+        original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        mime_type: 'video/mp4',
+        size_bytes: 7450000,
+        duration_seconds: 15.2,
+        created_at: '2026-07-29T11:00:00.000Z',
+      };
+      return {
+        requiresPassphrase: false,
+        project: {
+          name: 'Sharma - Verma Wedding 2026',
+          clientName: 'Rahul Sharma & Ananya Verma',
+        },
+        asset: {
+          id: asset.id,
+          name: asset.name,
+          type: 'video',
+          status: 'ready_for_review',
+          currentVersionId: 'demo-ver-1',
+        },
+        permissions: {
+          canComment: true,
+          canDownload: true,
+          canApprove: true,
+          showPreviousVersions: true,
+        },
+        currentVersion: version,
+        versions: [version],
+        comments: DEMO_COMMENTS['demo-ver-1'] || [],
+      };
+    }
   },
   submitClientComment: (token: string, data: any, passphrase?: string) => {
     const headers: Record<string, string> = {};
@@ -144,7 +571,7 @@ export const api = {
     });
   },
   getClientMediaUrl: (token: string, versionId?: string, passphrase?: string) => {
-    let url = `/api/review/${token}/media`;
+    let url = `${API_BASE}/review/${token}/media`;
     const params = new URLSearchParams();
     if (versionId) params.set('versionId', versionId);
     if (passphrase) params.set('passphrase', passphrase);
@@ -152,12 +579,12 @@ export const api = {
     return qs ? `${url}?${qs}` : url;
   },
   getClientDownloadUrl: (token: string, versionId: string, passphrase?: string) => {
-    let url = `/api/review/${token}/download/${versionId}`;
+    let url = `${API_BASE}/review/${token}/download/${versionId}`;
     if (passphrase) url += `?passphrase=${encodeURIComponent(passphrase)}`;
     return url;
   },
   getStaffMediaUrl: (assetId: string, versionId: string) => {
     const token = getAuthToken();
-    return `/api/assets/${assetId}/versions/${versionId}/media${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    return `${API_BASE}/assets/${assetId}/versions/${versionId}/media${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   },
 };

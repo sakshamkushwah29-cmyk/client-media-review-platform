@@ -56,13 +56,17 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve frontend build in production if available
-const clientDist = path.resolve(process.cwd(), 'dist/client');
-if (fs.existsSync(clientDist)) {
-  app.use(express.static(clientDist));
+const candidateDist = [
+  path.resolve(process.cwd(), 'dist'),
+  path.resolve(process.cwd(), 'dist/client')
+].find(d => fs.existsSync(path.join(d, 'index.html')));
+
+if (candidateDist) {
+  app.use(express.static(candidateDist));
   // Express 5 compatible catch-all fallback
   app.use((req, res, next) => {
     if (!req.path.startsWith('/api') && (req.method === 'GET' || req.method === 'HEAD')) {
-      return res.sendFile(path.join(clientDist, 'index.html'));
+      return res.sendFile(path.join(candidateDist, 'index.html'));
     }
     next();
   });
