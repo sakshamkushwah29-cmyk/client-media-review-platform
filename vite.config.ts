@@ -11,8 +11,11 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 5174,
     host: true,
+    watch: {
+      ignored: ['**/.agents/**', '**/dist/**', '**/storage/**', '**/data/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
