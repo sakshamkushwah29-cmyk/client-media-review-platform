@@ -32,6 +32,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Safety fallback: ensure loading never hangs indefinitely
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Sync Clerk authenticated user with platform backend
   useEffect(() => {
     const syncClerk = async () => {
@@ -63,9 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Fallback / legacy local auth restore if not signed in with Clerk
   useEffect(() => {
     const initAuth = async () => {
-      if (user) return;
       const token = localStorage.getItem('auth_token');
-      if (token) {
+      if (token && !user) {
         try {
           const { user } = await api.getMe();
           setUser(user);
@@ -76,13 +83,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(null);
         }
       }
-      if (isClerkLoaded) {
-        setLoading(false);
-      }
+      setLoading(false);
     };
 
     initAuth();
-  }, [isClerkLoaded, user]);
+  }, []);
 
   const login = async (email: string, pass: string) => {
     const res = await api.login({ email, password: pass });
