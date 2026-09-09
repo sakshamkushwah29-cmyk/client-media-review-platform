@@ -197,6 +197,54 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return response.json();
 }
 
+function getStoredProjects(): Project[] {
+  try {
+    const saved = localStorage.getItem('wedding_platform_projects_v2');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return [...DEMO_PROJECTS];
+}
+
+function saveStoredProjects(projects: Project[]) {
+  try {
+    localStorage.setItem('wedding_platform_projects_v2', JSON.stringify(projects));
+  } catch (e) {}
+}
+
+function getStoredAssets(projectId: string): Asset[] {
+  try {
+    const saved = localStorage.getItem(`wedding_platform_assets_${projectId}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return DEMO_ASSETS[projectId] || [];
+}
+
+function saveAsset(projectId: string, asset: Asset, version: AssetVersion) {
+  try {
+    const assets = getStoredAssets(projectId);
+    assets.unshift(asset);
+    localStorage.setItem(`wedding_platform_assets_${projectId}`, JSON.stringify(assets));
+
+    // Save versions for this asset
+    localStorage.setItem(`wedding_platform_ver_${asset.id}`, JSON.stringify([version]));
+
+    // Update project count
+    const projects = getStoredProjects();
+    const p = projects.find(proj => proj.id === projectId);
+    if (p) {
+      p.asset_count = (p.asset_count || 0) + 1;
+      p.total_bytes = (p.total_bytes || 0) + version.size_bytes;
+      saveStoredProjects(projects);
+    }
+  } catch (e) {}
+}
+
 export const api = {
   // Auth
   login: async (data: any) => {
@@ -356,24 +404,61 @@ export const api = {
   // Projects
   getProjects: async () => {
     try {
-      return await request<{ projects: Project[] }>('/projects');
-    } catch (err) {
-      return { projects: DEMO_PROJECTS };
-    }
+      const res = await request<{ projects: Project[] }>('/projects');
+      if (res?.projects && Array.isArray(res.projects)) {
+        return res;
+      }
+    } catch (err) {}
+    return { projects: getStoredProjects() };
   },
   getProject: async (id: string) => {
     try {
       return await request<{ project: Project; assets: Asset[] }>(`/projects/${id}`);
     } catch (err) {
-      const project = DEMO_PROJECTS.find(p => p.id === id) || DEMO_PROJECTS[0];
-      const assets = DEMO_ASSETS[id] || DEMO_ASSETS['demo-proj-1'] || [];
+      const projects = getStoredProjects();
+      const project = projects.find(p => p.id === id) || projects[0] || DEMO_PROJECTS[0];
+      const assets = getStoredAssets(id);
       return { project, assets };
     }
   },
-  createProject: (data: { name: string; clientName: string; description?: string }) =>
-    request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(data) }),
-  updateProject: (id: string, data: Partial<Project>) =>
-    request<{ project: Project }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  createProject: async (data: { name: string; clientName: string; description?: string }) => {
+    try {
+      return await request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(data) });
+    } catch (err) {
+      console.warn('Backend unavailable, saving project locally:', err);
+      const projects = getStoredProjects();
+      const newProject: Project = {
+        id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        organization_id: 'demo-org-id',
+        name: data.name,
+        client_name: data.clientName,
+        description: data.description || '',
+        status: 'active',
+        drive_folder_id: `gdrive_folder_${Date.now()}`,
+        created_by: 'demo-director-id',
+        created_at: new Date().toISOString(),
+        asset_count: 0,
+        total_bytes: 0,
+      };
+      projects.unshift(newProject);
+      saveStoredProjects(projects);
+      return { project: newProject };
+    }
+  },
+  updateProject: async (id: string, data: Partial<Project>) => {
+    try {
+      return await request<{ project: Project }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+    } catch (err) {
+      const projects = getStoredProjects();
+      const idx = projects.findIndex(p => p.id === id);
+      if (idx !== -1) {
+        projects[idx] = { ...projects[idx], ...data };
+        saveStoredProjects(projects);
+        return { project: projects[idx] };
+      }
+      return { project: { ...DEMO_PROJECTS[0], ...data } };
+    }
+  },
   getProjectActivity: async (id: string) => {
     try {
       return await request<{ activities: any[] }>(`/projects/${id}/activity`);
@@ -383,11 +468,55 @@ export const api = {
   },
 
   // Assets
-  uploadAsset: (projectId: string, formData: FormData) =>
-    request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
-      method: 'POST',
-      body: formData,
-    }),
+  uploadAsset: async (projectId: string, formData: FormData) => {
+    try {
+      return await request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
+        method: 'POST',
+        body: formData,
+      });
+    } catch (err) {
+      console.warn('Backend unavailable, storing asset locally:', err);
+      const file = formData.get('file') as File | null;
+      const name = (formData.get('name') as string) || file?.name || 'Wedding Media Cut';
+      const assetId = `ast-${Date.now()}`;
+      const versionId = `ver-${Date.now()}`;
+      const isVideo = !file || file.type.startsWith('video') || name.endsWith('.mp4') || name.endsWith('.mov');
+      const isImage = file?.type.startsWith('image') || name.endsWith('.jpg') || name.endsWith('.png');
+
+      const currentVersion: AssetVersion = {
+        id: versionId,
+        asset_id: assetId,
+        version_number: 1,
+        original_filename: name,
+        download_filename: name,
+        mime_type: file?.type || (isVideo ? 'video/mp4' : isImage ? 'image/jpeg' : 'application/octet-stream'),
+        size_bytes: file?.size || 15400000,
+        duration_seconds: isVideo ? 24.0 : 0,
+        created_at: new Date().toISOString(),
+      };
+
+      const asset: Asset = {
+        id: assetId,
+        project_id: projectId,
+        name,
+        asset_type: isVideo ? 'video' : isImage ? 'image' : 'other',
+        status: 'ready_for_review',
+        current_version_id: versionId,
+        created_by: 'demo-director-id',
+        created_at: new Date().toISOString(),
+        version_number: 1,
+        mime_type: currentVersion.mime_type,
+        size_bytes: currentVersion.size_bytes,
+        duration_seconds: currentVersion.duration_seconds,
+        original_filename: name,
+        comment_count: 0,
+        open_comment_count: 0,
+      };
+
+      saveAsset(projectId, asset, currentVersion);
+      return { asset, currentVersion };
+    }
+  },
   getAsset: async (id: string) => {
     try {
       return await request<{ asset: Asset; currentVersion: AssetVersion; versions: AssetVersion[] }>(`/assets/${id}`);
@@ -408,23 +537,87 @@ export const api = {
       return { asset, currentVersion: version, versions: [version] };
     }
   },
-  uploadNewVersion: (assetId: string, formData: FormData) =>
-    request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
-      method: 'POST',
-      body: formData,
-    }),
-  updateAssetStatus: (id: string, status: string) =>
-    request<{ asset: Asset }>(`/assets/${id}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
+  uploadNewVersion: async (assetId: string, formData: FormData) => {
+    try {
+      return await request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
+        method: 'POST',
+        body: formData,
+      });
+    } catch (err) {
+      const file = formData.get('file') as File | null;
+      const name = file?.name || 'Updated Cut V2';
+      const versionId = `ver-${Date.now()}`;
+      const version: AssetVersion = {
+        id: versionId,
+        asset_id: assetId,
+        version_number: 2,
+        original_filename: name,
+        download_filename: name,
+        mime_type: file?.type || 'video/mp4',
+        size_bytes: file?.size || 18500000,
+        duration_seconds: 28.0,
+        created_at: new Date().toISOString(),
+      };
+      const asset: Asset = {
+        id: assetId,
+        project_id: 'demo-proj-1',
+        name,
+        asset_type: 'video',
+        status: 'ready_for_review',
+        current_version_id: versionId,
+        created_by: 'demo-director-id',
+        created_at: new Date().toISOString(),
+        version_number: 2,
+      };
+      return { asset, version };
+    }
+  },
+  updateAssetStatus: async (id: string, status: string) => {
+    try {
+      return await request<{ asset: Asset }>(`/assets/${id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+    } catch (err) {
+      const asset: Asset = {
+        id,
+        project_id: 'demo-proj-1',
+        name: 'Wedding Media Cut',
+        asset_type: 'video',
+        status: status as any,
+        current_version_id: 'demo-ver-1',
+        created_by: 'demo-director-id',
+        created_at: new Date().toISOString(),
+      };
+      return { asset };
+    }
+  },
 
   // Review links
-  createReviewLink: (assetId: string, data: any) =>
-    request<{ reviewLink: ReviewLink }>(`/assets/${assetId}/review-links`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  createReviewLink: async (assetId: string, data: any) => {
+    try {
+      return await request<{ reviewLink: ReviewLink }>(`/assets/${assetId}/review-links`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      const token = `sharma-wedding-teaser-review`;
+      const reviewLink: ReviewLink = {
+        id: `link-${Date.now()}`,
+        project_id: data.projectId || 'demo-proj-1',
+        asset_id: assetId,
+        raw_token_display: token,
+        shareUrl: `${window.location.origin}/review/${token}`,
+        can_comment: data.canComment !== false ? 1 : 0,
+        can_download: data.canDownload !== false ? 1 : 0,
+        can_approve: data.canApprove !== false ? 1 : 0,
+        show_previous_versions: data.showPreviousVersions !== false ? 1 : 0,
+        created_by: 'demo-director-id',
+        created_at: new Date().toISOString(),
+      };
+      return { reviewLink };
+    }
+  },
   getReviewLinks: async (assetId: string) => {
     try {
       return await request<{ reviewLinks: ReviewLink[] }>(`/assets/${assetId}/review-links`);
@@ -552,23 +745,49 @@ export const api = {
       };
     }
   },
-  submitClientComment: (token: string, data: any, passphrase?: string) => {
-    const headers: Record<string, string> = {};
-    if (passphrase) headers['x-review-passphrase'] = passphrase;
-    return request<{ comment: Comment }>(`/review/${token}/comments`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(data),
-    });
+  submitClientComment: async (token: string, data: any, passphrase?: string) => {
+    try {
+      const headers: Record<string, string> = {};
+      if (passphrase) headers['x-review-passphrase'] = passphrase;
+      return await request<{ comment: Comment }>(`/review/${token}/comments`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      const comment: Comment = {
+        id: `cmt-${Date.now()}`,
+        asset_version_id: data.versionId || 'demo-ver-1',
+        author_name: data.authorName || 'Client Reviewer',
+        body: data.body,
+        time_seconds: data.timeSeconds ?? null,
+        status: 'open',
+        created_at: new Date().toISOString(),
+      };
+      return { comment };
+    }
   },
-  submitClientDecision: (token: string, data: any, passphrase?: string) => {
-    const headers: Record<string, string> = {};
-    if (passphrase) headers['x-review-passphrase'] = passphrase;
-    return request<{ decision: any; assetStatus: string }>(`/review/${token}/decision`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(data),
-    });
+  submitClientDecision: async (token: string, data: any, passphrase?: string) => {
+    try {
+      const headers: Record<string, string> = {};
+      if (passphrase) headers['x-review-passphrase'] = passphrase;
+      return await request<{ decision: any; assetStatus: string }>(`/review/${token}/decision`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      return {
+        decision: {
+          id: `dec-${Date.now()}`,
+          decision: data.decision,
+          message: data.message || '',
+          reviewer_name: data.reviewerName || 'Client Reviewer',
+          created_at: new Date().toISOString(),
+        },
+        assetStatus: data.decision === 'approved' ? 'approved' : 'changes_requested',
+      };
+    }
   },
   getClientMediaUrl: (token: string, versionId?: string, passphrase?: string) => {
     let url = `${API_BASE}/review/${token}/media`;
