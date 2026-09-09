@@ -175,11 +175,25 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
     setTimeout(() => setCopiedLinkId(null), 2500);
   };
 
-  if (loading || !asset || !selectedVersion) {
+  if (loading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center text-slate-500">
         <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
         <p className="text-xs">Loading media cut and version history...</p>
+      </div>
+    );
+  }
+
+  if (!asset || !selectedVersion) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center text-slate-500">
+        <p className="text-sm text-slate-400 mb-4">Asset or version not found.</p>
+        <button
+          onClick={onBack}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold cursor-pointer"
+        >
+          Back to Project
+        </button>
       </div>
     );
   }

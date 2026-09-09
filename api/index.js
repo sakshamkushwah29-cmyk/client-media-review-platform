@@ -203,6 +203,273 @@ export default async function handler(req, res) {
     });
   }
 
-  // Fallback 200 JSON for any unhandled API endpoints
+  // Specific Project: /api/projects/:id
+  if (url.includes('/projects/')) {
+    const parts = url.split('?')[0].split('/');
+    const projIndex = parts.indexOf('projects');
+    const projId = parts[projIndex + 1];
+    const subRoute = parts[projIndex + 2];
+
+    if (subRoute === 'activity') {
+      return res.status(200).json({ activities: [] });
+    }
+
+    if (subRoute === 'assets' && method === 'POST') {
+      const astId = 'ast-' + Date.now();
+      const verId = 'ver-' + Date.now();
+      const asset = {
+        id: astId,
+        project_id: projId,
+        name: 'Wedding Media Cut',
+        asset_type: 'video',
+        status: 'ready_for_review',
+        current_version_id: verId,
+        created_by: 'usr-director',
+        created_at: new Date().toISOString(),
+        version_number: 1,
+        mime_type: 'video/mp4',
+        size_bytes: 7450000,
+        duration_seconds: 15.2,
+      };
+      const version = {
+        id: verId,
+        asset_id: astId,
+        version_number: 1,
+        original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        mime_type: 'video/mp4',
+        size_bytes: 7450000,
+        duration_seconds: 15.2,
+        created_at: new Date().toISOString(),
+      };
+      return res.status(200).json({ asset, currentVersion: version });
+    }
+
+    if (method === 'PATCH') {
+      return res.status(200).json({
+        project: {
+          id: projId,
+          organization_id: 'org-wedding-studio',
+          name: body?.name || 'Updated Wedding Cut',
+          client_name: body?.clientName || 'Client',
+          status: body?.status || 'active',
+          drive_folder_id: 'fld-' + projId,
+          created_by: 'usr-director',
+          created_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    // Default GET project
+    const defaultName = projId === 'proj-2' ? 'Aditi & Vikram Sangeet & Reception' : 'Sharma - Verma Wedding 2026';
+    const defaultClient = projId === 'proj-2' ? 'Aditi Kapoor' : 'Rahul Sharma & Ananya Verma';
+
+    return res.status(200).json({
+      project: {
+        id: projId,
+        organization_id: 'org-wedding-studio',
+        name: body?.name || defaultName,
+        client_name: body?.clientName || defaultClient,
+        description: 'Cinematic wedding cut, Sangeet highlights, and 4K teaser in Udaipur.',
+        status: 'active',
+        drive_folder_id: 'fld-' + projId,
+        created_by: 'usr-director',
+        created_at: new Date().toISOString(),
+        asset_count: 2,
+        total_bytes: 22850000,
+      },
+      assets: [
+        {
+          id: 'ast-1',
+          project_id: projId,
+          name: 'Wedding Teaser Cut V2',
+          asset_type: 'video',
+          status: 'ready_for_review',
+          current_version_id: 'ver-1',
+          created_by: 'usr-director',
+          created_at: '2026-07-29T11:00:00.000Z',
+          version_number: 2,
+          mime_type: 'video/mp4',
+          size_bytes: 7450000,
+          duration_seconds: 15.2,
+          original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+          comment_count: 2,
+          open_comment_count: 1,
+        },
+      ],
+    });
+  }
+
+  // Assets: /api/assets/:id
+  if (url.includes('/assets/')) {
+    const parts = url.split('?')[0].split('/');
+    const astIndex = parts.indexOf('assets');
+    const astId = parts[astIndex + 1];
+    const subRoute = parts[astIndex + 2];
+
+    if (subRoute === 'review-links') {
+      if (method === 'POST') {
+        return res.status(200).json({
+          reviewLink: {
+            id: 'link-' + Date.now(),
+            project_id: 'proj-1',
+            asset_id: astId,
+            raw_token_display: 'sharma-wedding-teaser-review',
+            can_comment: 1,
+            can_download: 1,
+            can_approve: 1,
+            show_previous_versions: 1,
+            created_by: 'usr-director',
+            created_at: new Date().toISOString(),
+          },
+        });
+      }
+      return res.status(200).json({ reviewLinks: [] });
+    }
+
+    if (subRoute === 'versions' && method === 'POST') {
+      const ver = {
+        id: 'ver-' + Date.now(),
+        asset_id: astId,
+        version_number: 2,
+        original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        mime_type: 'video/mp4',
+        size_bytes: 7450000,
+        duration_seconds: 15.2,
+        created_at: new Date().toISOString(),
+      };
+      return res.status(200).json({
+        asset: {
+          id: astId,
+          project_id: 'proj-1',
+          name: 'Wedding Teaser Cut V2',
+          asset_type: 'video',
+          status: 'ready_for_review',
+          current_version_id: ver.id,
+          created_by: 'usr-director',
+          created_at: new Date().toISOString(),
+        },
+        version: ver,
+      });
+    }
+
+    const version = {
+      id: 'ver-1',
+      asset_id: astId,
+      version_number: 2,
+      original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      mime_type: 'video/mp4',
+      size_bytes: 7450000,
+      duration_seconds: 15.2,
+      created_at: '2026-07-29T11:00:00.000Z',
+    };
+
+    return res.status(200).json({
+      asset: {
+        id: astId,
+        project_id: 'proj-1',
+        name: 'Wedding Teaser Cut V2',
+        asset_type: 'video',
+        status: 'ready_for_review',
+        current_version_id: 'ver-1',
+        created_by: 'usr-director',
+        created_at: '2026-07-29T11:00:00.000Z',
+      },
+      currentVersion: version,
+      versions: [version],
+    });
+  }
+
+  // Comments: /api/comments
+  if (url.includes('/comments')) {
+    if (method === 'POST') {
+      return res.status(200).json({
+        comment: {
+          id: 'cmt-' + Date.now(),
+          asset_version_id: 'ver-1',
+          author_name: body?.authorName || 'Studio Member',
+          body: body?.body || '',
+          time_seconds: body?.timeSeconds ?? null,
+          status: 'open',
+          created_at: new Date().toISOString(),
+        },
+      });
+    }
+    if (method === 'PATCH') {
+      return res.status(200).json({
+        comment: {
+          id: 'cmt-1',
+          status: body?.status || 'done',
+        },
+        statusEvent: { id: 'evt-' + Date.now(), previous_status: 'open', new_status: body?.status },
+      });
+    }
+    return res.status(200).json({
+      comments: [
+        {
+          id: 'cmt-1',
+          asset_version_id: 'ver-1',
+          author_name: 'Client Reviewer',
+          body: 'lalaa',
+          time_seconds: 5.0,
+          status: 'open',
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+      ],
+    });
+  }
+
+  // Review Room: /api/review/:token
+  if (url.includes('/review/')) {
+    const version = {
+      id: 'ver-1',
+      asset_id: 'ast-1',
+      version_number: 2,
+      original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      mime_type: 'video/mp4',
+      size_bytes: 7450000,
+      duration_seconds: 15.2,
+      created_at: '2026-07-29T11:00:00.000Z',
+    };
+
+    return res.status(200).json({
+      requiresPassphrase: false,
+      project: {
+        name: 'Sharma - Verma Wedding 2026',
+        clientName: 'Rahul Sharma & Ananya Verma',
+      },
+      asset: {
+        id: 'ast-1',
+        name: 'Wedding Teaser Cut V2',
+        type: 'video',
+        status: 'ready_for_review',
+        currentVersionId: 'ver-1',
+      },
+      permissions: {
+        canComment: true,
+        canDownload: true,
+        canApprove: true,
+        showPreviousVersions: true,
+      },
+      currentVersion: version,
+      versions: [version],
+      comments: [
+        {
+          id: 'cmt-1',
+          asset_version_id: 'ver-1',
+          author_name: 'Client Reviewer',
+          body: 'lalaa',
+          time_seconds: 5.0,
+          status: 'open',
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+      ],
+    });
+  }
+
+  // Fallback 200 JSON for any other API endpoints
   return res.status(200).json({ success: true, message: 'Vercel API route active', url, method });
 }
