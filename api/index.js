@@ -267,7 +267,52 @@ const commentsStore = {
       created_at: new Date(Date.now() - 7200000).toISOString(),
     },
   ],
+  'demo-ver-1': [
+    {
+      id: 'cmt-1',
+      asset_version_id: 'demo-ver-1',
+      author_name: 'Client Reviewer',
+      body: 'Color grading adjustment made for wedding vows entrance',
+      time_seconds: 5.0,
+      status: 'open',
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+    },
+    {
+      id: 'cmt-2',
+      asset_version_id: 'demo-ver-1',
+      author_name: 'Studio Director',
+      body: 'Drone establishing shot timing approved',
+      time_seconds: 8.5,
+      status: 'done',
+      created_at: new Date(Date.now() - 7200000).toISOString(),
+    },
+  ],
 };
+
+const COMMENTS_PERSIST_FILE = '/tmp/wedding_comments.json';
+
+function loadPersistedComments() {
+  try {
+    if (fs.existsSync(COMMENTS_PERSIST_FILE)) {
+      const data = JSON.parse(fs.readFileSync(COMMENTS_PERSIST_FILE, 'utf8'));
+      if (data && typeof data === 'object') {
+        for (const [k, v] of Object.entries(data)) {
+          if (Array.isArray(v)) {
+            commentsStore[k] = v;
+          }
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+function persistComments() {
+  try {
+    fs.writeFileSync(COMMENTS_PERSIST_FILE, JSON.stringify(commentsStore), 'utf8');
+  } catch (e) {}
+}
+
+loadPersistedComments();
 
 // Helper: Stream a sample MP4 video with HTTP 206 Partial Content Range support
 function streamMedia(req, res) {
@@ -458,7 +503,7 @@ export default async function handler(req, res) {
       const projAssets = assetsStore[proj.id] || [];
       for (const asset of projAssets) {
         const ver = versionsStore[asset.current_version_id] || {
-          id: asset.current_version_id || 'ver-1',
+          id: asset.current_version_id || (asset.id === 'ast-1' ? 'ver-1' : `ver-${asset.id}`),
           version_number: asset.version_number || 1,
           original_filename: asset.original_filename || asset.name,
           download_filename: asset.download_filename || asset.name,
@@ -722,7 +767,7 @@ export default async function handler(req, res) {
         name: 'Wedding Media Cut',
         asset_type: 'video',
         status: 'ready_for_review',
-        current_version_id: 'ver-1',
+        current_version_id: astId === 'ast-1' ? 'ver-1' : `ver-${astId}`,
         created_by: 'usr-director',
         created_at: new Date().toISOString(),
         version_number: 1,
@@ -794,8 +839,9 @@ export default async function handler(req, res) {
       return res.status(200).json({ asset });
     }
 
-    const currVer = versionsStore[asset.current_version_id] || {
-      id: asset.current_version_id || 'ver-1',
+    const targetVersionId = asset.current_version_id || (asset.id === 'ast-1' ? 'ver-1' : `ver-${astId}`);
+    const currVer = versionsStore[targetVersionId] || {
+      id: targetVersionId,
       asset_id: astId,
       version_number: asset.version_number || 1,
       original_filename: asset.original_filename || asset.name,
@@ -817,8 +863,11 @@ export default async function handler(req, res) {
   // COMMENTS: /api/comments
   // --------------------------------------------------------------------------
   if (url.includes('/comments')) {
+    const versionMatch = url.match(/\/comments\/version\/([^/?]+)/);
+    const versionIdFromUrl = versionMatch ? versionMatch[1] : null;
+
     if (method === 'POST') {
-      const versionId = body?.versionId || 'ver-1';
+      const versionId = versionIdFromUrl || body?.versionId || (body?.assetId ? `ver-${body.assetId}` : 'ver-1');
       const newComment = {
         id: 'cmt-' + Date.now(),
         asset_version_id: versionId,
@@ -830,17 +879,34 @@ export default async function handler(req, res) {
       };
       if (!commentsStore[versionId]) commentsStore[versionId] = [];
       commentsStore[versionId].push(newComment);
+      persistComments();
       return res.status(200).json({ comment: newComment });
     }
 
     if (method === 'PATCH') {
-      const commentId = url.split('/').pop();
+      const commentId = url.split('?')[0].split('/').pop();
+      let found = null;
+      for (const vId in commentsStore) {
+        const item = commentsStore[vId].find((c) => c.id === commentId);
+        if (item) {
+          item.status = body?.status || 'done';
+          found = item;
+          break;
+        }
+      }
+      persistComments();
       return res.status(200).json({
-        comment: {
+        comment: found || {
           id: commentId,
           status: body?.status || 'done',
         },
         statusEvent: { id: 'evt-' + Date.now(), previous_status: 'open', new_status: body?.status },
+      });
+    }
+
+    if (versionIdFromUrl) {
+      return res.status(200).json({
+        comments: commentsStore[versionIdFromUrl] || [],
       });
     }
 
@@ -875,15 +941,19 @@ export default async function handler(req, res) {
 
     // Comments submission on review room
     if (subRoute === 'comments' && method === 'POST') {
+      const targetVersionId = body?.versionId || (link.asset_id === 'ast-1' ? 'ver-1' : `ver-${link.asset_id || 'new'}`);
       const newComment = {
         id: 'cmt-' + Date.now(),
-        asset_version_id: body?.versionId || 'ver-1',
+        asset_version_id: targetVersionId,
         author_name: body?.authorName || link?.client_name || 'Client Reviewer',
         body: body?.body || '',
         time_seconds: body?.timeSeconds ?? null,
         status: 'open',
         created_at: new Date().toISOString(),
       };
+      if (!commentsStore[targetVersionId]) commentsStore[targetVersionId] = [];
+      commentsStore[targetVersionId].push(newComment);
+      persistComments();
       return res.status(200).json({ comment: newComment });
     }
 
@@ -933,8 +1003,9 @@ export default async function handler(req, res) {
       };
     }
 
-    const version = versionsStore[asset.current_version_id || 'ver-1'] || {
-      id: asset.current_version_id || 'ver-' + asset.id,
+    const targetVersionId = asset.current_version_id || (asset.id === 'ast-1' ? 'ver-1' : `ver-${asset.id}`);
+    const version = versionsStore[targetVersionId] || {
+      id: targetVersionId,
       asset_id: asset.id,
       version_number: 1,
       original_filename: `${asset.name}.mp4`,
@@ -945,17 +1016,13 @@ export default async function handler(req, res) {
       created_at: link.created_at || new Date().toISOString(),
     };
 
-    const comments = commentsStore[version.id] || [
-      {
-        id: 'cmt-1',
-        asset_version_id: version.id,
-        author_name: 'Client Reviewer',
-        body: 'Color grading looks stunning!',
-        time_seconds: 5.0,
-        status: 'open',
-        created_at: new Date(Date.now() - 3600000).toISOString(),
-      },
-    ];
+    const isDemoCut = link.raw_token_display === 'sharma-wedding-teaser-review' ||
+                      asset.id === 'ast-1' ||
+                      asset.id === 'demo-asset-1' ||
+                      version.id === 'ver-1' ||
+                      version.id === 'demo-ver-1';
+
+    const comments = commentsStore[version.id] || (isDemoCut ? (commentsStore['ver-1'] || []) : []);
 
     return res.status(200).json({
       requiresPassphrase: Boolean(link?.passphrase && req.headers['x-review-passphrase'] !== link.passphrase),

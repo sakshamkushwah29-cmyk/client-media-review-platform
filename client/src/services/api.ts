@@ -151,7 +151,7 @@ const DEMO_COMMENTS: Record<string, Comment[]> = {
       review_link_id: 'demo-link-1',
       author_user_id: undefined,
       author_name: 'Client Reviewer',
-      body: 'lalaa',
+      body: 'Color grading adjustment made for wedding vows entrance',
       time_seconds: 5.0,
       status: 'open',
       created_at: new Date(Date.now() - 3600000).toISOString(),
@@ -161,7 +161,7 @@ const DEMO_COMMENTS: Record<string, Comment[]> = {
       asset_version_id: 'demo-ver-1',
       author_user_id: 'demo-director-id',
       author_name: 'Studio Lead',
-      body: 'Color grading adjustment made for wedding vows entrance',
+      body: 'Drone establishing shot timing approved',
       time_seconds: 8.5,
       status: 'done',
       created_at: new Date(Date.now() - 7200000).toISOString(),
@@ -296,6 +296,49 @@ export function saveStoredReviewLinks(links: ReviewLink[]) {
   try {
     localStorage.setItem('wedding_platform_review_links_v2', JSON.stringify(links));
   } catch (e) {}
+}
+
+export function getStoredComments(versionId: string): Comment[] {
+  try {
+    const saved = localStorage.getItem(`wedding_platform_comments_${versionId}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+
+  // ONLY demo-ver-1 / ver-1 gets initial sample comments! All user-created cuts start with 0 comments.
+  if (versionId === 'demo-ver-1' || versionId === 'ver-1') {
+    return DEMO_COMMENTS['demo-ver-1'] || [];
+  }
+  return [];
+}
+
+export function saveStoredComments(versionId: string, comments: Comment[]) {
+  try {
+    localStorage.setItem(`wedding_platform_comments_${versionId}`, JSON.stringify(comments));
+  } catch (e) {}
+}
+
+export function updateStoredCommentStatus(commentId: string, status: 'open' | 'in_progress' | 'done'): Comment | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('wedding_platform_comments_')) {
+        const val = localStorage.getItem(key);
+        if (val) {
+          const list: Comment[] = JSON.parse(val);
+          const idx = list.findIndex((c) => c.id === commentId);
+          if (idx !== -1) {
+            list[idx].status = status;
+            localStorage.setItem(key, JSON.stringify(list));
+            return list[idx];
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
 }
 
 export function encodeReviewToken(payload: any): string {
@@ -907,45 +950,68 @@ export const api = {
   // Comments (Staff Workflow)
   getVersionComments: async (versionId: string) => {
     try {
-      return await request<{ comments: Comment[] }>(`/comments/version/${versionId}`);
+      const res = await request<{ comments: Comment[] }>(`/comments/version/${versionId}`);
+      if (res && Array.isArray(res.comments)) {
+        // For non-demo versions, combine with locally added comments if any
+        if (versionId !== 'demo-ver-1' && versionId !== 'ver-1') {
+          const stored = getStoredComments(versionId);
+          const map = new Map<string, Comment>();
+          for (const c of res.comments) map.set(c.id, c);
+          for (const c of stored) map.set(c.id, c);
+          return { comments: Array.from(map.values()) };
+        }
+        return res;
+      }
     } catch (err) {
-      return { comments: DEMO_COMMENTS[versionId] || DEMO_COMMENTS['demo-ver-1'] || [] };
+      // API call failed or offline
     }
+    return { comments: getStoredComments(versionId) };
   },
   addStaffComment: async (versionId: string, data: { body: string; timeSeconds?: number | null; authorName?: string }) => {
     try {
-      return await request<{ comment: Comment }>(`/comments/version/${versionId}`, {
+      const res = await request<{ comment: Comment }>(`/comments/version/${versionId}`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
+      if (res && res.comment) {
+        const stored = getStoredComments(versionId);
+        if (!stored.some((c) => c.id === res.comment.id)) {
+          saveStoredComments(versionId, [...stored, res.comment]);
+        }
+        return res;
+      }
     } catch (err) {
-      const newComment: Comment = {
-        id: `comment-${Date.now()}`,
-        asset_version_id: versionId,
-        author_name: data.authorName || 'Studio Member',
-        body: data.body,
-        time_seconds: data.timeSeconds ?? null,
-        status: 'open',
-        created_at: new Date().toISOString(),
-      };
-      if (!DEMO_COMMENTS[versionId]) DEMO_COMMENTS[versionId] = [];
-      DEMO_COMMENTS[versionId].push(newComment);
-      return { comment: newComment };
+      // fallback
     }
+    const newComment: Comment = {
+      id: `comment-${Date.now()}`,
+      asset_version_id: versionId,
+      author_name: data.authorName || 'Studio Member',
+      body: data.body,
+      time_seconds: data.timeSeconds ?? null,
+      status: 'open',
+      created_at: new Date().toISOString(),
+    };
+    const stored = getStoredComments(versionId);
+    saveStoredComments(versionId, [...stored, newComment]);
+    return { comment: newComment };
   },
   updateCommentStatus: async (commentId: string, status: 'open' | 'in_progress' | 'done') => {
     try {
-      return await request<{ comment: Comment; statusEvent: any }>(`/comments/${commentId}/status`, {
+      const res = await request<{ comment: Comment; statusEvent: any }>(`/comments/${commentId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
+      updateStoredCommentStatus(commentId, status);
+      return res;
     } catch (err) {
+      const updated = updateStoredCommentStatus(commentId, status);
       return {
-        comment: {
+        comment: updated || {
           id: commentId,
-          asset_version_id: 'demo-ver-1',
-          author_name: 'Client Reviewer',
-          body: 'lalaa',
+          asset_version_id: 'ver-1',
+          author_name: 'Studio Member',
+          body: '',
           status,
           created_at: new Date().toISOString(),
         },
@@ -1018,7 +1084,7 @@ export const api = {
       if (versions.length === 0) {
         versions = [
           {
-            id: asset.current_version_id || 'ver-1',
+            id: asset.current_version_id || (asset.id === 'ast-1' || asset.id === 'demo-asset-1' ? 'demo-ver-1' : `ver-${asset.id}`),
             asset_id: asset.id,
             version_number: 1,
             original_filename: asset.original_filename || `${asset.name}.mp4`,
@@ -1052,7 +1118,7 @@ export const api = {
         },
         currentVersion: versions[0],
         versions,
-        comments: DEMO_COMMENTS[versions[0].id] || [],
+        comments: getStoredComments(versions[0].id),
       };
     }
 
@@ -1107,7 +1173,7 @@ export const api = {
         },
         currentVersion: version,
         versions: [version],
-        comments: [],
+        comments: getStoredComments(version.id),
       };
     }
 
@@ -1158,23 +1224,37 @@ export const api = {
     try {
       const headers: Record<string, string> = {};
       if (passphrase) headers['x-review-passphrase'] = passphrase;
-      return await request<{ comment: Comment }>(`/review/${token}/comments`, {
+      const res = await request<{ comment: Comment }>(`/review/${token}/comments`, {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
       });
+      if (res && res.comment) {
+        const vId = res.comment.asset_version_id || data.versionId;
+        if (vId) {
+          const stored = getStoredComments(vId);
+          if (!stored.some((c) => c.id === res.comment.id)) {
+            saveStoredComments(vId, [...stored, res.comment]);
+          }
+        }
+        return res;
+      }
     } catch (err) {
-      const comment: Comment = {
-        id: `cmt-${Date.now()}`,
-        asset_version_id: data.versionId || 'demo-ver-1',
-        author_name: data.authorName || 'Client Reviewer',
-        body: data.body,
-        time_seconds: data.timeSeconds ?? null,
-        status: 'open',
-        created_at: new Date().toISOString(),
-      };
-      return { comment };
+      // fallback
     }
+    const vId = data.versionId || 'demo-ver-1';
+    const comment: Comment = {
+      id: `cmt-${Date.now()}`,
+      asset_version_id: vId,
+      author_name: data.authorName || 'Client Reviewer',
+      body: data.body,
+      time_seconds: data.timeSeconds ?? null,
+      status: 'open',
+      created_at: new Date().toISOString(),
+    };
+    const stored = getStoredComments(vId);
+    saveStoredComments(vId, [...stored, comment]);
+    return { comment };
   },
   submitClientDecision: async (token: string, data: any, passphrase?: string) => {
     try {

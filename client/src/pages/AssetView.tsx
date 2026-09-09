@@ -79,7 +79,7 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
   const fetchComments = async (versionId: string) => {
     try {
       const data = await api.getVersionComments(versionId);
-      if (data.comments) {
+      if (data && Array.isArray(data.comments)) {
         setComments(data.comments);
         return;
       }
@@ -91,14 +91,16 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
       const activeToken = reviewLinks[0]?.raw_token_display;
       if (activeToken) {
         const reviewData = await api.getClientReview(activeToken);
-        if (reviewData.comments) {
+        if (reviewData && Array.isArray(reviewData.comments)) {
           const verComments = reviewData.comments.filter((c) => c.asset_version_id === versionId);
           setComments(verComments);
+          return;
         }
       }
     } catch (e) {
       console.warn('Could not fetch comments via review fallback', e);
     }
+    setComments([]);
   };
 
   useEffect(() => {

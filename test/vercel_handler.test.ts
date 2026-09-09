@@ -270,8 +270,94 @@ async function runTests() {
   assert(aliasResp.data.assets.length > 0, 'demo-proj-1 must return demo assets');
   console.log(`  ✅ demo-proj-1 alias returned ${aliasResp.data.assets.length} demo assets.`);
 
+  // Test 13: Comments isolation - Demo version ver-1 has 2 sample comments
+  console.log('\nTest 13: Demo version ver-1 returns sample comments');
+  const { req: demoCmtReq, res: demoCmtRes, getResponse: getDemoCmtResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/comments/version/ver-1',
+  });
+  await handler(demoCmtReq, demoCmtRes);
+  const demoCmtResp = getDemoCmtResp();
+  assert.strictEqual(demoCmtResp.statusCode, 200);
+  assert.strictEqual(demoCmtResp.data.comments.length, 2, 'ver-1 must have 2 comments');
+  console.log(`  ✅ Demo version ver-1 returned ${demoCmtResp.data.comments.length} sample comments.`);
+
+  // Test 14: Comments isolation - New cut version ver-new-999 starts with strictly 0 comments
+  console.log('\nTest 14: New cut version ver-new-999 starts with strictly 0 comments');
+  const { req: newCmtReq, res: newCmtRes, getResponse: getNewCmtResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/comments/version/ver-new-999',
+  });
+  await handler(newCmtReq, newCmtRes);
+  const newCmtResp = getNewCmtResp();
+  assert.strictEqual(newCmtResp.statusCode, 200);
+  assert.strictEqual(newCmtResp.data.comments.length, 0, 'New cut version must have strictly 0 comments');
+  console.log('  ✅ Verified new cut version ver-new-999 starts clean with 0 comments.');
+
+  // Test 15: Review room for a new cut token starts with strictly 0 comments
+  console.log('\nTest 15: Review room for new cut token starts with strictly 0 comments');
+  const newCutPayload = {
+    id: `link-new-${Date.now()}`,
+    asset_id: 'custom-asset-brand-new',
+    project_id: 'custom-proj-brand-new',
+    asset_name: 'Haldi Ceremony Highlights',
+    can_comment: 1,
+    can_download: 1,
+  };
+  const newCutB64 = Buffer.from(JSON.stringify(newCutPayload)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const newCutToken = `rev_${newCutB64}`;
+
+  const { req: newCutReq, res: newCutRes, getResponse: getNewCutResp } = createMockReqRes({
+    method: 'GET',
+    url: `/api/review/${newCutToken}`,
+  });
+  await handler(newCutReq, newCutRes);
+  const newCutResp = getNewCutResp();
+  assert.strictEqual(newCutResp.statusCode, 200);
+  assert.strictEqual(newCutResp.data.comments.length, 0, 'Review room for new cut must have strictly 0 comments');
+  console.log('  ✅ Review room for new cut has 0 comments (no unwanted demo reviews).');
+
+  // Test 16: Posting a comment on new cut saves and isolates to that cut
+  console.log('\nTest 16: Posting comment on new cut saves and isolates to that cut');
+  const { req: postCmtReq, res: postCmtRes, getResponse: getPostCmtResp } = createMockReqRes({
+    method: 'POST',
+    url: '/api/comments/version/ver-new-999',
+    body: {
+      body: 'Client loves the entry sequence, audio level needs +2dB',
+      authorName: 'Aarav Sharma',
+      timeSeconds: 12.4,
+    },
+  });
+  await handler(postCmtReq, postCmtRes);
+  const postCmtResp = getPostCmtResp();
+  assert.strictEqual(postCmtResp.statusCode, 200);
+  assert(postCmtResp.data?.comment?.id, 'Comment created with ID');
+  assert.strictEqual(postCmtResp.data.comment.asset_version_id, 'ver-new-999');
+
+  // Verify subsequent GET returns strictly the 1 newly added comment
+  const { req: checkCmtReq, res: checkCmtRes, getResponse: getCheckCmtResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/comments/version/ver-new-999',
+  });
+  await handler(checkCmtReq, checkCmtRes);
+  const checkCmtResp = getCheckCmtResp();
+  assert.strictEqual(checkCmtResp.data.comments.length, 1, 'ver-new-999 should now have exactly 1 comment');
+  assert.strictEqual(checkCmtResp.data.comments[0].body, 'Client loves the entry sequence, audio level needs +2dB');
+  console.log('  ✅ New comment saved and retrieved exclusively on ver-new-999.');
+
+  // Test 17: Other new cut versions still have 0 comments (no cross-contamination)
+  console.log('\nTest 17: Other new cut versions still have strictly 0 comments');
+  const { req: otherCmtReq, res: otherCmtRes, getResponse: getOtherCmtResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/comments/version/ver-other-cut-888',
+  });
+  await handler(otherCmtReq, otherCmtRes);
+  const otherCmtResp = getOtherCmtResp();
+  assert.strictEqual(otherCmtResp.data.comments.length, 0, 'Other new cut version must have 0 comments');
+  console.log('  ✅ Verified no comment leakage: ver-other-cut-888 has 0 comments.');
+
   console.log('\n========================================================');
-  console.log('🎉 ALL 12 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
+  console.log('🎉 ALL 17 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
   console.log('========================================================\n');
 }
 
