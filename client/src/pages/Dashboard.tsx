@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react';
-import { Project } from '../types';
+import { Project, ReviewLink } from '../types';
 import { api } from '../services/api';
 import { StorageMeter } from '../components/StorageMeter';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +20,13 @@ import {
   X,
   ChevronRight,
   ExternalLink,
+  Link2,
+  Copy,
+  Check,
+  Trash2,
+  Eye,
+  Shield,
+  Clock,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -34,6 +41,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectProject }) => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'archived'>('active');
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [reviewLinks, setReviewLinks] = useState<ReviewLink[]>([]);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
 
   // New project form
   const [projectName, setProjectName] = useState<string>('');
@@ -43,21 +52,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectProject }) => {
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const fetchProjects = async () => {
+  const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const data = await api.getProjects();
-      setProjects(data.projects);
+      const [projData, linksData] = await Promise.all([
+        api.getProjects(),
+        api.getAllReviewLinks().catch(() => ({ reviewLinks: [] })),
+      ]);
+      setProjects(projData.projects);
+      setReviewLinks(linksData.reviewLinks || []);
     } catch (err: any) {
-      console.error('Failed to load projects', err);
+      console.error('Failed to load dashboard data', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchProjects();
+    fetchDashboardData();
   }, []);
+
+  const handleCopyLink = (link: ReviewLink) => {
+    const rawToken = link.raw_token_display || link.id;
+    const url = `${window.location.origin}/review/${rawToken}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLinkId(link.id);
+    setTimeout(() => setCopiedLinkId(null), 2500);
+  };
+
+  const handleRevokeLink = async (linkId: string) => {
+    if (!confirm('Are you sure you want to revoke this review link? Clients using this link will immediately lose access.')) return;
+    try {
+      await api.revokeReviewLink(linkId);
+      setReviewLinks((prev) =>
+        prev.map((l) => (l.id === linkId ? { ...l, revoked_at: new Date().toISOString() } : l))
+      );
+    } catch (e: any) {
+      alert(e.message || 'Failed to revoke link');
+    }
+  };
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,7 +108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectProject }) => {
       setProjectName('');
       setClientName('');
       setDescription('');
-      await fetchProjects();
+      await fetchDashboardData();
       onSelectProject(res.project.id);
     } catch (err: any) {
       alert(err.message || 'Failed to create project');
@@ -175,6 +208,123 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectProject }) => {
 
       {/* 150 GB Google Drive Quota Meter */}
       <StorageMeter />
+
+      {/* Active Client Review Links Section (PRD Section 6.2, LINK-01) */}
+      <div className="bg-[#111420] border border-[#202538] rounded-2xl p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+              <Link2 className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Saved Client Review Links</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-950 text-indigo-300 border border-indigo-800/40">
+                  {reviewLinks.filter((l) => !l.revoked_at).length} Active
+                </span>
+              </h2>
+              <p className="text-[11px] text-slate-400">
+                Persistent share links for client review, timecoded comments, and approvals.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {reviewLinks.length === 0 ? (
+          <div className="py-6 text-center text-slate-500 text-xs">
+            No client review links created yet. Share a media cut from inside any project to generate client links.
+          </div>
+        ) : (
+          <div className="divide-y divide-[#1e2338]">
+            {reviewLinks.map((link) => {
+              const isRevoked = Boolean(link.revoked_at);
+              const isExpired = Boolean(link.expires_at && new Date(link.expires_at) < new Date());
+              const rawToken = link.raw_token_display || link.id;
+              const fullUrl = `${window.location.origin}/review/${rawToken}`;
+
+              return (
+                <div
+                  key={link.id}
+                  className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="font-bold text-slate-200 truncate">
+                        {link.asset_name || 'Wedding Media Cut'}
+                      </span>
+                      {link.project_name && (
+                        <>
+                          <span className="text-slate-600">•</span>
+                          <span className="text-slate-400 text-[11px] truncate">
+                            {link.project_name}
+                          </span>
+                        </>
+                      )}
+                      {isRevoked ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          Revoked
+                        </span>
+                      ) : isExpired ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          Expired
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Active
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] font-mono text-indigo-400 truncate">
+                      <span className="truncate">{fullUrl}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleCopyLink(link)}
+                      className="px-3 py-1.5 rounded-lg bg-[#181d2e] hover:bg-[#20273f] text-slate-300 hover:text-white border border-[#2b334d] text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Copy Share Link"
+                    >
+                      {copiedLinkId === link.id ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400 font-semibold">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Copy Link</span>
+                        </>
+                      )}
+                    </button>
+
+                    <a
+                      href={`/review/${rawToken}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Preview Room</span>
+                    </a>
+
+                    {!isRevoked && (
+                      <button
+                        onClick={() => handleRevokeLink(link.id)}
+                        className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 border border-transparent hover:border-rose-500/20 transition-colors cursor-pointer"
+                        title="Revoke Link"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Frame.io Subheader Filter & Sorting Bar */}
       <div className="flex items-center justify-between text-xs text-slate-400 border-b border-[#1b1f2e] pb-3">

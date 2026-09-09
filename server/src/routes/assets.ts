@@ -400,8 +400,8 @@ router.post('/assets/:id/review-links', requireStaffAuth, async (req: AuthReques
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    // Cryptographically random token (PRD LINK-06, LINK-07)
-    const rawToken = generateReviewToken();
+    // Cryptographically random token (PRD LINK-06, LINK-07) or client-supplied token
+    const rawToken = (req.body.token && typeof req.body.token === 'string' && req.body.token.trim()) || generateReviewToken();
     const tokenHash = hashToken(rawToken);
     const linkId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -443,12 +443,19 @@ router.post('/assets/:id/review-links', requireStaffAuth, async (req: AuthReques
       metadata: { assetId, canComment, canDownload, canApprove, hasPassphrase: !!passphraseHash, expiresAt },
     });
 
-    const linkRecord = db.query(`SELECT * FROM review_links WHERE id = ?`).get(linkId) as any;
+    const linkRecord = db.query(`
+      SELECT rl.*, a.name as asset_name, p.name as project_name, p.client_name
+      FROM review_links rl
+      JOIN assets a ON rl.asset_id = a.id
+      JOIN projects p ON rl.project_id = p.id
+      WHERE rl.id = ?
+    `).get(linkId) as any;
 
     return res.status(201).json({
       reviewLink: {
         ...linkRecord,
         rawToken, // Sent once for user copy
+        raw_token_display: rawToken,
         shareUrl: `/review/${rawToken}`,
       },
     });
@@ -465,13 +472,35 @@ router.get('/assets/:id/review-links', requireStaffAuth, (req: AuthRequest, res:
     const orgId = req.user!.organizationId;
 
     const links = db.query(`
-      SELECT rl.*, prof.full_name as creator_name
+      SELECT rl.*, prof.full_name as creator_name, a.name as asset_name, p.name as project_name, p.client_name
       FROM review_links rl
       JOIN projects p ON rl.project_id = p.id
+      JOIN assets a ON rl.asset_id = a.id
       LEFT JOIN profiles prof ON rl.created_by = prof.id
       WHERE rl.asset_id = ? AND p.organization_id = ?
       ORDER BY rl.created_at DESC
     `).all(assetId, orgId);
+
+    return res.json({ reviewLinks: links });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to list review links' });
+  }
+});
+
+// 7.1. List all review links for organization (Dashboard & Storage Vault)
+router.get('/review-links', requireStaffAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const orgId = req.user!.organizationId;
+
+    const links = db.query(`
+      SELECT rl.*, prof.full_name as creator_name, a.name as asset_name, p.name as project_name, p.client_name
+      FROM review_links rl
+      JOIN projects p ON rl.project_id = p.id
+      JOIN assets a ON rl.asset_id = a.id
+      LEFT JOIN profiles prof ON rl.created_by = prof.id
+      WHERE p.organization_id = ?
+      ORDER BY rl.created_at DESC
+    `).all(orgId);
 
     return res.json({ reviewLinks: links });
   } catch (err: any) {
@@ -489,15 +518,15 @@ router.delete('/review-links/:id', requireStaffAuth, (req: AuthRequest, res: Res
       SELECT rl.*, p.organization_id
       FROM review_links rl
       JOIN projects p ON rl.project_id = p.id
-      WHERE rl.id = ? AND p.organization_id = ?
-    `).get(linkId, orgId) as any;
+      WHERE (rl.id = ? OR rl.raw_token_display = ?) AND p.organization_id = ?
+    `).get(linkId, linkId, orgId) as any;
 
     if (!link) {
       return res.status(404).json({ error: 'Review link not found' });
     }
 
     const now = new Date().toISOString();
-    db.run(`UPDATE review_links SET revoked_at = ? WHERE id = ?`, [now, linkId]);
+    db.run(`UPDATE review_links SET revoked_at = ? WHERE id = ?`, [now, link.id]);
 
     logActivity({
       organizationId: orgId,
@@ -505,7 +534,7 @@ router.delete('/review-links/:id', requireStaffAuth, (req: AuthRequest, res: Res
       actorUserId: req.user!.id,
       actorName: req.user!.fullName,
       eventType: 'review_link_revoked',
-      objectId: linkId,
+      objectId: link.id,
       metadata: { assetId: link.asset_id },
     });
 

@@ -8,6 +8,7 @@ import {
   Comment,
   ClientReviewData,
 } from '../types';
+import { saveMediaBlob } from './mediaStorage';
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL
   ? `${(import.meta as any).env.VITE_API_URL.replace(/\/$/, '')}/api`
@@ -245,6 +246,84 @@ function saveAsset(projectId: string, asset: Asset, version: AssetVersion) {
   } catch (e) {}
 }
 
+const INITIAL_DEMO_REVIEW_LINKS: ReviewLink[] = [
+  {
+    id: 'demo-link-1',
+    project_id: 'demo-proj-1',
+    asset_id: 'demo-asset-1',
+    raw_token_display: 'sharma-wedding-teaser-review',
+    shareUrl: '/review/sharma-wedding-teaser-review',
+    can_comment: 1,
+    can_download: 1,
+    can_approve: 1,
+    show_previous_versions: 1,
+    created_by: 'demo-director-id',
+    created_at: '2026-07-29T12:00:00.000Z',
+    asset_name: 'Wedding Teaser Cut V2',
+    project_name: 'Sharma - Verma Wedding 2026',
+    client_name: 'Rahul Sharma & Ananya Verma',
+  },
+  {
+    id: 'demo-link-2',
+    project_id: 'demo-proj-1',
+    asset_id: 'demo-asset-1',
+    raw_token_display: 'demo-review-token',
+    shareUrl: '/review/demo-review-token',
+    can_comment: 1,
+    can_download: 1,
+    can_approve: 1,
+    show_previous_versions: 1,
+    created_by: 'demo-director-id',
+    created_at: '2026-07-29T12:00:00.000Z',
+    asset_name: 'Wedding Teaser Cut V2',
+    project_name: 'Sharma - Verma Wedding 2026',
+    client_name: 'Rahul Sharma & Ananya Verma',
+  },
+];
+
+export function getStoredReviewLinks(): ReviewLink[] {
+  try {
+    const saved = localStorage.getItem('wedding_platform_review_links_v2');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return [...INITIAL_DEMO_REVIEW_LINKS];
+}
+
+export function saveStoredReviewLinks(links: ReviewLink[]) {
+  try {
+    localStorage.setItem('wedding_platform_review_links_v2', JSON.stringify(links));
+  } catch (e) {}
+}
+
+export function encodeReviewToken(payload: any): string {
+  try {
+    const jsonStr = JSON.stringify(payload);
+    const base64 = typeof btoa !== 'undefined'
+      ? btoa(unescape(encodeURIComponent(jsonStr)))
+      : Buffer.from(jsonStr, 'utf8').toString('base64');
+    return 'rev_' + base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch (e) {
+    return `rev-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
+  }
+}
+
+export function decodeReviewToken(token: string): any | null {
+  if (!token || typeof token !== 'string' || !token.startsWith('rev_')) return null;
+  try {
+    let base64 = token.slice(4).replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) base64 += '=';
+    const jsonStr = typeof atob !== 'undefined'
+      ? decodeURIComponent(escape(atob(base64)))
+      : Buffer.from(base64, 'base64').toString('utf8');
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    return null;
+  }
+}
+
 export const api = {
   // Auth
   login: async (data: any) => {
@@ -294,10 +373,11 @@ export const api = {
     }
   },
   getStorageFiles: async () => {
+    let filesResult: { files: any[]; cloudStorageUrl: string };
     try {
-      return await request<{ files: any[]; cloudStorageUrl: string }>('/organization/files');
+      filesResult = await request<{ files: any[]; cloudStorageUrl: string }>('/organization/files');
     } catch (err) {
-      return {
+      filesResult = {
         cloudStorageUrl: 'https://www.jioaicloud.com/l/?u=g4hmxUTO-wgVwF-fLP9Bx-cyfJyX-vprhmiygn1LPJ50buo7GG7VSBbwMbOf04FwhIb',
         files: [
           {
@@ -318,7 +398,7 @@ export const api = {
             project_name: 'Sharma - Verma Wedding 2026',
             client_name: 'Rahul Sharma & Ananya Verma',
             drive_folder_id: 'folder-1',
-            review_token: 'demo-review-token',
+            review_token: 'sharma-wedding-teaser-review',
           },
           {
             version_id: 'demo-ver-2',
@@ -363,6 +443,24 @@ export const api = {
         ],
       };
     }
+
+    // Attach review links to all files
+    const allLinks = getStoredReviewLinks();
+    const files = filesResult.files || [];
+
+    for (const f of files) {
+      const match = allLinks.find((l) => l.asset_id === f.asset_id);
+      if (match?.raw_token_display) {
+        f.review_token = match.raw_token_display;
+        f.review_link_id = match.id;
+        f.review_link_revoked = Boolean(match.revoked_at);
+      }
+    }
+
+    return {
+      cloudStorageUrl: filesResult.cloudStorageUrl,
+      files,
+    };
   },
   getNotifications: async () => {
     try {
@@ -406,17 +504,60 @@ export const api = {
     try {
       const res = await request<{ projects: Project[] }>('/projects');
       if (res?.projects && Array.isArray(res.projects)) {
-        return res;
+        const localProjects = getStoredProjects();
+        const merged = [...res.projects];
+        for (const lp of localProjects) {
+          if (!merged.some((m) => m.id === lp.id)) {
+            merged.push(lp);
+          }
+        }
+        return { projects: merged };
       }
     } catch (err) {}
     return { projects: getStoredProjects() };
   },
   getProject: async (id: string) => {
     try {
-      return await request<{ project: Project; assets: Asset[] }>(`/projects/${id}`);
+      const res = await request<{ project: Project; assets: Asset[] }>(`/projects/${id}`);
+      if (res && res.project) {
+        const storedAssets = getStoredAssets(id);
+        const isDemo = id === 'proj-1' || id === 'demo-proj-1' || id === 'proj-2' || id === 'demo-proj-2';
+
+        if (!isDemo) {
+          // Strictly isolate non-demo projects: filter out hardcoded demo cuts (ast-1, ast-2, etc.)
+          const validAssets = (res.assets || []).filter(
+            (a) => a.project_id === id && a.id !== 'ast-1' && a.id !== 'demo-asset-1' && a.id !== 'ast-2' && a.id !== 'demo-asset-2'
+          );
+          for (const sa of storedAssets) {
+            if (!validAssets.some((va) => va.id === sa.id)) {
+              validAssets.push(sa);
+            }
+          }
+          return {
+            project: {
+              ...res.project,
+              asset_count: validAssets.length,
+            },
+            assets: validAssets,
+          };
+        }
+        return res;
+      }
     } catch (err) {
       const projects = getStoredProjects();
-      const project = projects.find(p => p.id === id) || projects[0] || DEMO_PROJECTS[0];
+      const project = projects.find((p) => p.id === id) || {
+        id,
+        organization_id: 'org-wedding-studio',
+        name: 'New Wedding Film',
+        client_name: 'Wedding Client',
+        description: '',
+        status: 'active',
+        drive_folder_id: `fld-${id}`,
+        created_by: 'usr-director',
+        created_at: new Date().toISOString(),
+        asset_count: 0,
+        total_bytes: 0,
+      };
       const assets = getStoredAssets(id);
       return { project, assets };
     }
@@ -469,14 +610,16 @@ export const api = {
 
   // Assets
   uploadAsset: async (projectId: string, formData: FormData) => {
+    const file = formData.get('file') as File | null;
+    let res: { asset: Asset; currentVersion: AssetVersion };
+
     try {
-      return await request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
+      res = await request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
         method: 'POST',
         body: formData,
       });
     } catch (err) {
       console.warn('Backend unavailable, storing asset locally:', err);
-      const file = formData.get('file') as File | null;
       const name = (formData.get('name') as string) || file?.name || 'Wedding Media Cut';
       const assetId = `ast-${Date.now()}`;
       const versionId = `ver-${Date.now()}`;
@@ -514,8 +657,20 @@ export const api = {
       };
 
       saveAsset(projectId, asset, currentVersion);
-      return { asset, currentVersion };
+      res = { asset, currentVersion };
     }
+
+    // Persist blob to IndexedDB for zero-latency local playback
+    if (file && res?.currentVersion?.id) {
+      try {
+        await saveMediaBlob(res.currentVersion.id, file);
+        await saveMediaBlob(res.asset.id, file);
+      } catch (e) {
+        console.warn('Could not cache file in IndexedDB:', e);
+      }
+    }
+
+    return res;
   },
   getAsset: async (id: string) => {
     try {
@@ -538,13 +693,15 @@ export const api = {
     }
   },
   uploadNewVersion: async (assetId: string, formData: FormData) => {
+    const file = formData.get('file') as File | null;
+    let res: { asset: Asset; version: AssetVersion };
+
     try {
-      return await request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
+      res = await request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
         method: 'POST',
         body: formData,
       });
     } catch (err) {
-      const file = formData.get('file') as File | null;
       const name = file?.name || 'Updated Cut V2';
       const versionId = `ver-${Date.now()}`;
       const version: AssetVersion = {
@@ -569,8 +726,16 @@ export const api = {
         created_at: new Date().toISOString(),
         version_number: 2,
       };
-      return { asset, version };
+      res = { asset, version };
     }
+
+    if (file && res?.version?.id) {
+      try {
+        await saveMediaBlob(res.version.id, file);
+      } catch (e) {}
+    }
+
+    return res;
   },
   updateAssetStatus: async (id: string, status: string) => {
     try {
@@ -593,56 +758,151 @@ export const api = {
     }
   },
 
-  // Review links
+  // Review links (Persistent in storage & localStorage)
   createReviewLink: async (assetId: string, data: any) => {
+    // Find parent project & asset for richer metadata
+    const allProjects = getStoredProjects();
+    let parentProject: Project | undefined;
+    let targetAsset: Asset | undefined;
+
+    for (const p of allProjects) {
+      const assets = getStoredAssets(p.id);
+      const a = assets.find((ast) => ast.id === assetId);
+      if (a) {
+        targetAsset = a;
+        parentProject = p;
+        break;
+      }
+    }
+
+    const prjId = parentProject?.id || data.projectId || 'demo-proj-1';
+    const astName = targetAsset?.name || data.assetName || 'Wedding Media Cut';
+    const prjName = parentProject?.name || data.projectName || 'Wedding Film';
+    const cliName = parentProject?.client_name || data.clientName || 'Wedding Client';
+    const linkId = `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const tokenPayload = {
+      id: linkId,
+      asset_id: assetId,
+      astId: assetId,
+      project_id: prjId,
+      prjId: prjId,
+      asset_name: astName,
+      astName: astName,
+      project_name: prjName,
+      prjName: prjName,
+      client_name: cliName,
+      cliName: cliName,
+      can_comment: data.canComment !== false ? 1 : 0,
+      com: data.canComment !== false ? 1 : 0,
+      can_download: data.canDownload !== false ? 1 : 0,
+      dwn: data.canDownload !== false ? 1 : 0,
+      can_approve: data.canApprove !== false ? 1 : 0,
+      app: data.canApprove !== false ? 1 : 0,
+      show_previous_versions: data.showPreviousVersions !== false ? 1 : 0,
+      prev: data.showPreviousVersions !== false ? 1 : 0,
+      passphrase_hash: data.passphrase || undefined,
+      pass: data.passphrase || undefined,
+      expires_at: data.expiresAt || undefined,
+      exp: data.expiresAt || undefined,
+      created_at: new Date().toISOString(),
+    };
+
+    const selfDescribingToken = encodeReviewToken(tokenPayload);
+    const rawToken = data.token || selfDescribingToken;
+    let createdLink: ReviewLink | null = null;
+
     try {
-      return await request<{ reviewLink: ReviewLink }>(`/assets/${assetId}/review-links`, {
+      const res = await request<{ reviewLink: ReviewLink }>(`/assets/${assetId}/review-links`, {
         method: 'POST',
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, token: rawToken }),
       });
+      if (res?.reviewLink) {
+        createdLink = res.reviewLink;
+      }
     } catch (err) {
-      const token = `sharma-wedding-teaser-review`;
-      const reviewLink: ReviewLink = {
-        id: `link-${Date.now()}`,
-        project_id: data.projectId || 'demo-proj-1',
-        asset_id: assetId,
-        raw_token_display: token,
-        shareUrl: `${window.location.origin}/review/${token}`,
-        can_comment: data.canComment !== false ? 1 : 0,
-        can_download: data.canDownload !== false ? 1 : 0,
-        can_approve: data.canApprove !== false ? 1 : 0,
-        show_previous_versions: data.showPreviousVersions !== false ? 1 : 0,
-        created_by: 'demo-director-id',
-        created_at: new Date().toISOString(),
-      };
-      return { reviewLink };
+      console.warn('Backend unavailable, saving review link locally:', err);
     }
+
+    const tokenToUse = createdLink?.raw_token_display || rawToken;
+    const finalLink: ReviewLink = {
+      id: createdLink?.id || linkId,
+      project_id: prjId,
+      asset_id: assetId,
+      raw_token_display: tokenToUse,
+      shareUrl: `/review/${tokenToUse}`,
+      can_comment: data.canComment !== false ? 1 : 0,
+      can_download: data.canDownload !== false ? 1 : 0,
+      can_approve: data.canApprove !== false ? 1 : 0,
+      show_previous_versions: data.showPreviousVersions !== false ? 1 : 0,
+      passphrase_hash: data.passphrase || undefined,
+      expires_at: data.expiresAt || undefined,
+      created_by: 'demo-director-id',
+      created_at: new Date().toISOString(),
+      asset_name: astName,
+      project_name: prjName,
+      client_name: cliName,
+    };
+
+    // Save to localStorage
+    const existing = getStoredReviewLinks();
+    const updated = [finalLink, ...existing.filter((l) => l.id !== finalLink.id && l.raw_token_display !== finalLink.raw_token_display)];
+    saveStoredReviewLinks(updated);
+
+    return { reviewLink: finalLink };
   },
+
   getReviewLinks: async (assetId: string) => {
+    let apiLinks: ReviewLink[] = [];
     try {
-      return await request<{ reviewLinks: ReviewLink[] }>(`/assets/${assetId}/review-links`);
-    } catch (err) {
-      return {
-        reviewLinks: [
-          {
-            id: 'demo-link-1',
-            project_id: 'demo-proj-1',
-            asset_id: assetId,
-            raw_token_display: 'demo-review-token',
-            shareUrl: `${window.location.origin}/review/demo-review-token`,
-            can_comment: 1,
-            can_download: 1,
-            can_approve: 1,
-            show_previous_versions: 1,
-            created_by: 'demo-director-id',
-            created_at: '2026-07-29T12:00:00.000Z',
-          },
-        ],
-      };
+      const res = await request<{ reviewLinks: ReviewLink[] }>(`/assets/${assetId}/review-links`);
+      if (res?.reviewLinks && Array.isArray(res.reviewLinks)) {
+        apiLinks = res.reviewLinks;
+      }
+    } catch (err) {}
+
+    const localLinks = getStoredReviewLinks().filter((l) => l.asset_id === assetId);
+    const merged = [...apiLinks];
+    for (const ll of localLinks) {
+      if (!merged.some((m) => m.id === ll.id || m.raw_token_display === ll.raw_token_display)) {
+        merged.push(ll);
+      }
     }
+    return { reviewLinks: merged };
   },
-  revokeReviewLink: (id: string) =>
-    request<{ success: boolean }>(`/review-links/${id}`, { method: 'DELETE' }),
+
+  getAllReviewLinks: async () => {
+    let apiLinks: ReviewLink[] = [];
+    try {
+      const res = await request<{ reviewLinks: ReviewLink[] }>('/review-links');
+      if (res?.reviewLinks && Array.isArray(res.reviewLinks)) {
+        apiLinks = res.reviewLinks;
+      }
+    } catch (err) {}
+
+    const localLinks = getStoredReviewLinks();
+    const merged = [...apiLinks];
+    for (const ll of localLinks) {
+      if (!merged.some((m) => m.id === ll.id || m.raw_token_display === ll.raw_token_display)) {
+        merged.push(ll);
+      }
+    }
+    return { reviewLinks: merged };
+  },
+
+  revokeReviewLink: async (id: string) => {
+    try {
+      await request<{ success: boolean }>(`/review-links/${id}`, { method: 'DELETE' });
+    } catch (e) {}
+
+    const links = getStoredReviewLinks();
+    const idx = links.findIndex((l) => l.id === id);
+    if (idx !== -1) {
+      links[idx].revoked_at = new Date().toISOString();
+      saveStoredReviewLinks(links);
+    }
+    return { success: true };
+  },
 
   // Comments (Staff Workflow)
   getVersionComments: async (versionId: string) => {
@@ -706,8 +966,154 @@ export const api = {
     try {
       const headers: Record<string, string> = {};
       if (passphrase) headers['x-review-passphrase'] = passphrase;
-      return await request<ClientReviewData>(`/review/${token}`, { headers });
-    } catch (err) {
+      const res = await request<ClientReviewData>(`/review/${token}`, { headers });
+      if (res && res.asset) {
+        return res;
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('revoked') || err?.message?.includes('expired')) {
+        throw err;
+      }
+      console.warn('Backend review lookup failed, checking local stored review links:', err);
+    }
+
+    // Resolve dynamic token from localStorage
+    const storedLinks = getStoredReviewLinks();
+    const matchedLink = storedLinks.find(
+      (l) => l.raw_token_display === token || l.id === token
+    );
+
+    if (matchedLink) {
+      if (matchedLink.revoked_at) {
+        throw new Error('This review link has been revoked by the studio.');
+      }
+      if (matchedLink.expires_at && new Date(matchedLink.expires_at) < new Date()) {
+        throw new Error('This review link has expired.');
+      }
+      const projects = getStoredProjects();
+      const proj = projects.find((p) => p.id === matchedLink.project_id) || {
+        id: matchedLink.project_id,
+        name: matchedLink.project_name || 'Wedding Film',
+        client_name: matchedLink.client_name || 'Wedding Client',
+      };
+
+      const assets = getStoredAssets(matchedLink.project_id);
+      const asset = assets.find((a) => a.id === matchedLink.asset_id) || {
+        id: matchedLink.asset_id,
+        project_id: matchedLink.project_id,
+        name: matchedLink.asset_name || 'Wedding Media Cut',
+        asset_type: 'video',
+        status: 'ready_for_review',
+        currentVersionId: 'ver-' + matchedLink.asset_id,
+        created_by: 'demo-director-id',
+        created_at: matchedLink.created_at,
+      };
+
+      let versions: AssetVersion[] = [];
+      try {
+        const vSaved = localStorage.getItem(`wedding_platform_ver_${asset.id}`);
+        if (vSaved) versions = JSON.parse(vSaved);
+      } catch (e) {}
+
+      if (versions.length === 0) {
+        versions = [
+          {
+            id: asset.current_version_id || 'ver-1',
+            asset_id: asset.id,
+            version_number: 1,
+            original_filename: asset.original_filename || `${asset.name}.mp4`,
+            download_filename: asset.original_filename || `${asset.name}.mp4`,
+            mime_type: asset.mime_type || 'video/mp4',
+            size_bytes: asset.size_bytes || 7450000,
+            duration_seconds: asset.duration_seconds || 15.2,
+            created_at: asset.created_at,
+          },
+        ];
+      }
+
+      return {
+        requiresPassphrase: Boolean(matchedLink.passphrase_hash && passphrase !== matchedLink.passphrase_hash),
+        project: {
+          name: proj.name,
+          clientName: proj.client_name,
+        },
+        asset: {
+          id: asset.id,
+          name: asset.name,
+          type: (asset.asset_type as any) || 'video',
+          status: asset.status || 'ready_for_review',
+          currentVersionId: versions[0].id,
+        },
+        permissions: {
+          canComment: Boolean(matchedLink.can_comment),
+          canDownload: Boolean(matchedLink.can_download),
+          canApprove: Boolean(matchedLink.can_approve),
+          showPreviousVersions: Boolean(matchedLink.show_previous_versions),
+        },
+        currentVersion: versions[0],
+        versions,
+        comments: DEMO_COMMENTS[versions[0].id] || [],
+      };
+    }
+
+    // Resolve self-describing token (e.g. rev_...) for cross-origin or cold start client access
+    const decoded = decodeReviewToken(token);
+    if (decoded) {
+      if (decoded.revoked_at) {
+        throw new Error('This review link has been revoked by the studio.');
+      }
+      if (decoded.expires_at && new Date(decoded.expires_at) < new Date()) {
+        throw new Error('This review link has expired.');
+      }
+      const astId = decoded.asset_id || decoded.astId || 'ast-1';
+      const prjId = decoded.project_id || decoded.prjId || 'proj-1';
+      const astName = decoded.asset_name || decoded.astName || 'Wedding Media Cut';
+      const prjName = decoded.project_name || decoded.prjName || 'Wedding Film';
+      const cliName = decoded.client_name || decoded.cliName || 'Wedding Client';
+
+      const version: AssetVersion = {
+        id: `ver-${astId}`,
+        asset_id: astId,
+        version_number: 1,
+        original_filename: `${astName}.mp4`,
+        download_filename: `${astName}.mp4`,
+        mime_type: 'video/mp4',
+        size_bytes: 7450000,
+        duration_seconds: 15.2,
+        created_at: decoded.created_at || new Date().toISOString(),
+      };
+
+      return {
+        requiresPassphrase: Boolean(
+          (decoded.passphrase_hash || decoded.pass) &&
+          passphrase !== (decoded.passphrase_hash || decoded.pass)
+        ),
+        project: {
+          name: prjName,
+          clientName: cliName,
+        },
+        asset: {
+          id: astId,
+          name: astName,
+          type: 'video',
+          status: 'ready_for_review',
+          currentVersionId: version.id,
+        },
+        permissions: {
+          canComment: decoded.can_comment !== undefined ? Boolean(decoded.can_comment) : (decoded.com !== undefined ? Boolean(decoded.com) : true),
+          canDownload: decoded.can_download !== undefined ? Boolean(decoded.can_download) : (decoded.dwn !== undefined ? Boolean(decoded.dwn) : true),
+          canApprove: decoded.can_approve !== undefined ? Boolean(decoded.can_approve) : (decoded.app !== undefined ? Boolean(decoded.app) : true),
+          showPreviousVersions: decoded.show_previous_versions !== undefined ? Boolean(decoded.show_previous_versions) : (decoded.prev !== undefined ? Boolean(decoded.prev) : true),
+        },
+        currentVersion: version,
+        versions: [version],
+        comments: [],
+      };
+    }
+
+    // Only allow explicit demo tokens to fall back to the demo cut
+    const isDemoToken = token === 'sharma-wedding-teaser-review' || token === 'demo-review-token';
+    if (isDemoToken) {
       const asset = DEMO_ASSETS['demo-proj-1'][0];
       const version: AssetVersion = {
         id: 'demo-ver-1',
@@ -744,6 +1150,9 @@ export const api = {
         comments: DEMO_COMMENTS['demo-ver-1'] || [],
       };
     }
+
+    // For any other token that cannot be resolved, throw an explicit error!
+    throw new Error('This review link was not found or has expired.');
   },
   submitClientComment: async (token: string, data: any, passphrase?: string) => {
     try {

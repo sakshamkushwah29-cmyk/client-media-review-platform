@@ -33,6 +33,7 @@ export interface Marker {
 
 interface VideoPlayerProps {
   src: string;
+  fallbackSrc?: string;
   poster?: string;
   onTimeUpdate?: (time: number) => void;
   onDurationChange?: (duration: number) => void;
@@ -83,6 +84,7 @@ function getAvatarColor(name?: string): string {
 
 export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   src,
+  fallbackSrc,
   poster,
   onTimeUpdate,
   onDurationChange,
@@ -93,6 +95,16 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+
+  // Playback src & fallback management
+  const [currentSrc, setCurrentSrc] = useState<string>(src);
+  const [hasTriedFallback, setHasTriedFallback] = useState<boolean>(false);
+
+  useEffect(() => {
+    setCurrentSrc(src);
+    setHasTriedFallback(false);
+    setError(null);
+  }, [src]);
 
   // Authoritative playback state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -230,6 +242,14 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   const handleCanPlay = () => setIsLoading(false);
   const handleError = () => {
     setIsLoading(false);
+    if (fallbackSrc && !hasTriedFallback && currentSrc !== fallbackSrc) {
+      console.warn(`Video playback failed for "${currentSrc}", attempting fallback: "${fallbackSrc}"`);
+      setHasTriedFallback(true);
+      setCurrentSrc(fallbackSrc);
+      setIsLoading(true);
+      setError(null);
+      return;
+    }
     setError('Unable to stream media file.');
   };
 
@@ -358,7 +378,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       >
         <video
           ref={videoRef}
-          src={src}
+          src={currentSrc}
           poster={poster}
           className="w-full h-full max-h-[78vh] object-contain"
           playsInline
@@ -383,9 +403,44 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
 
         {/* Error overlay */}
         {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/85 text-rose-400 p-4 text-center">
-            <AlertCircle className="w-12 h-12 mb-2" />
-            <p className="font-semibold">{error}</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 text-slate-200 p-6 text-center z-30 pointer-events-auto">
+            <AlertCircle className="w-12 h-12 text-rose-500 mb-3" />
+            <p className="font-semibold text-white mb-1">{error}</p>
+            <p className="text-xs text-slate-400 mb-4 max-w-md">
+              The media cut stream could not be loaded directly. You can retry loading or load the sample preview stream.
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setError(null);
+                  setIsLoading(true);
+                  if (videoRef.current) {
+                    videoRef.current.load();
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-lg shadow-indigo-600/30 transition-all"
+              >
+                Retry Playback
+              </button>
+              {fallbackSrc && currentSrc !== fallbackSrc && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setError(null);
+                    setHasTriedFallback(true);
+                    setCurrentSrc(fallbackSrc);
+                    setIsLoading(true);
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium cursor-pointer border border-slate-700 transition-all"
+                >
+                  Load Sample Preview
+                </button>
+              )}
+            </div>
           </div>
         )}
 

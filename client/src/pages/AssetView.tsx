@@ -8,6 +8,7 @@ import { CommentThread } from '../components/CommentThread';
 import { CreateReviewLinkModal } from '../components/CreateReviewLinkModal';
 import { UploadVersionModal } from '../components/UploadVersionModal';
 import { useAuth } from '../context/AuthContext';
+import { getMediaBlobUrl, revokeBlobUrl } from '../services/mediaStorage';
 import {
   ChevronLeft,
   Share2,
@@ -21,6 +22,8 @@ import {
   Download,
   SidebarClose,
   SidebarOpen,
+  Link2,
+  X,
 } from 'lucide-react';
 
 interface AssetViewProps {
@@ -38,10 +41,12 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
 
-  // Modals
+  // Modals & Links
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
+  const [showManageLinksModal, setShowManageLinksModal] = useState<boolean>(false);
   const [showVersionModal, setShowVersionModal] = useState<boolean>(false);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(null);
 
   // Video player reference & playback time
   const playerRef = useRef<VideoPlayerRef | null>(null);
@@ -99,6 +104,34 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
   useEffect(() => {
     fetchAssetData();
   }, [assetId]);
+
+  useEffect(() => {
+    let active = true;
+    const versionId = selectedVersion?.id;
+
+    if (versionId) {
+      getMediaBlobUrl(versionId).then((url) => {
+        if (active && url) {
+          setLocalBlobUrl(url);
+        } else if (active && asset?.id) {
+          getMediaBlobUrl(asset.id).then((assetUrl) => {
+            if (active) setLocalBlobUrl(assetUrl || null);
+          });
+        } else if (active) {
+          setLocalBlobUrl(null);
+        }
+      });
+    } else {
+      setLocalBlobUrl(null);
+    }
+
+    return () => {
+      active = false;
+      if (versionId) {
+        revokeBlobUrl(versionId);
+      }
+    };
+  }, [selectedVersion?.id, asset?.id]);
 
   const handleSelectVersion = async (ver: AssetVersion) => {
     setSelectedVersion(ver);
@@ -211,6 +244,9 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
       isResolved: c.status === 'done',
     }));
 
+  // Active review links
+  const activeReviewLinks = reviewLinks.filter((l) => !l.revoked_at);
+
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col bg-[#090b11] text-slate-100 overflow-hidden font-['Plus_Jakarta_Sans',sans-serif] -m-6">
       {/* Frame.io Top Header Bar */}
@@ -264,6 +300,15 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
           )}
 
           <button
+            onClick={() => setShowManageLinksModal(true)}
+            className="px-3 py-1.5 rounded-lg bg-[#141724] hover:bg-[#1a1f30] border border-[#23283b] text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="View saved review links"
+          >
+            <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Review Links ({activeReviewLinks.length})</span>
+          </button>
+
+          <button
             onClick={() => setShowVersionModal(true)}
             className="px-3 py-1.5 rounded-lg bg-[#141724] hover:bg-[#1a1f30] border border-[#23283b] text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
@@ -289,6 +334,55 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
         </div>
       </header>
 
+      {/* Active Review Link Quick Bar */}
+      {activeReviewLinks.length > 0 && (
+        <div className="bg-[#111422] border-b border-[#1b1f2e] px-4 py-2 flex items-center justify-between text-xs shrink-0">
+          <div className="flex items-center gap-2 text-slate-300 min-w-0">
+            <span className="flex h-2 w-2 relative shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="font-semibold text-white shrink-0">Active Review Link:</span>
+            <span className="font-mono text-indigo-300 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-800/40 truncate">
+              {window.location.origin}/review/{activeReviewLinks[0].raw_token_display}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => handleCopyLink(activeReviewLinks[0])}
+              className="px-2.5 py-1 rounded bg-[#191d2c] hover:bg-[#22273b] border border-[#2b3149] text-slate-300 text-[11px] font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {copiedLinkId === activeReviewLinks[0].id ? (
+                <>
+                  <Check className="w-3 h-3 text-emerald-400" />
+                  <span className="text-emerald-400 font-semibold">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3 text-indigo-400" />
+                  <span>Copy Link</span>
+                </>
+              )}
+            </button>
+            <a
+              href={`/review/${activeReviewLinks[0].raw_token_display}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <span>Preview Room</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              onClick={() => setShowManageLinksModal(true)}
+              className="text-slate-400 hover:text-slate-200 text-[11px] underline ml-1 cursor-pointer"
+            >
+              Manage ({activeReviewLinks.length})
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Workspace: Full-Bleed Video + Frame.io Sidebar */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Maximized Video Player Viewport */}
@@ -297,7 +391,8 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
             {asset.asset_type === 'video' ? (
               <VideoPlayer
                 ref={playerRef}
-                src={mediaUrl}
+                src={localBlobUrl || mediaUrl}
+                fallbackSrc="/sample-video.mp4"
                 markers={videoMarkers}
                 onTimeUpdate={(t) => setCurrentPlaybackTime(t)}
                 onMarkerClick={(t) => {
@@ -305,9 +400,9 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
                 }}
               />
             ) : asset.asset_type === 'image' ? (
-              <ImagePreview src={mediaUrl} alt={asset.name} />
+              <ImagePreview src={localBlobUrl || mediaUrl} alt={asset.name} />
             ) : asset.asset_type === 'pdf' ? (
-              <PdfPreview src={mediaUrl} filename={selectedVersion.download_filename} />
+              <PdfPreview src={localBlobUrl || mediaUrl} filename={selectedVersion.download_filename} />
             ) : (
               <div className="p-12 text-center bg-[#11131c] rounded-2xl border border-slate-800 text-slate-400">
                 Unsupported preview format.
@@ -342,6 +437,7 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
         <CreateReviewLinkModal
           assetId={asset.id}
           assetName={asset.name}
+          projectId={asset.project_id}
           onClose={() => setShowShareModal(false)}
           onCreated={(newLink) => {
             setReviewLinks((prev) => [newLink, ...prev]);
@@ -358,6 +454,143 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
           onClose={() => setShowVersionModal(false)}
           onSuccess={() => fetchAssetData()}
         />
+      )}
+
+      {/* Manage Review Links Modal */}
+      {showManageLinksModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#0f111a] border border-slate-800 rounded-2xl w-full max-w-xl p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-indigo-400" />
+                  Review Links for &ldquo;{asset.name}&rdquo;
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Manage persistent review links created for clients and external reviewers.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowManageLinksModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {reviewLinks.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-xs">
+                  No review links created for this asset yet. Click &ldquo;Create New Link&rdquo; to generate one.
+                </div>
+              ) : (
+                reviewLinks.map((link) => {
+                  const isRevoked = Boolean(link.revoked_at);
+                  const isExpired = link.expires_at && new Date(link.expires_at) < new Date();
+                  const shareUrl = `${window.location.origin}/review/${link.raw_token_display}`;
+
+                  return (
+                    <div
+                      key={link.id}
+                      className={`p-3.5 rounded-xl border transition-all ${
+                        isRevoked
+                          ? 'bg-slate-900/30 border-slate-800/50 opacity-60'
+                          : 'bg-[#151824] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                isRevoked
+                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  : isExpired
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              }`}
+                            >
+                              {isRevoked ? 'Revoked' : isExpired ? 'Expired' : 'Active'}
+                            </span>
+                            {link.has_passphrase && (
+                              <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
+                                Password Protected
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-mono text-xs text-indigo-300 truncate bg-[#0d0f17] px-2.5 py-1 rounded border border-slate-800/80 select-all">
+                            {shareUrl}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/60 mt-2">
+                        <span>Created {new Date(link.created_at).toLocaleDateString()}</span>
+                        <div className="flex items-center gap-1.5">
+                          {!isRevoked && (
+                            <>
+                              <button
+                                onClick={() => handleCopyLink(link)}
+                                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                {copiedLinkId === link.id ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span className="text-emerald-400">Copied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3 text-slate-400" />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                              <a
+                                href={`/review/${link.raw_token_display}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white font-medium flex items-center gap-1 transition-all cursor-pointer"
+                              >
+                                <span>Preview</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                              <button
+                                onClick={() => handleRevokeLink(link.id)}
+                                className="p-1 rounded hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                title="Revoke review link"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 pt-3 border-t border-slate-800/80">
+              <button
+                onClick={() => {
+                  setShowManageLinksModal(false);
+                  setShowShareModal(true);
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Create New Link</span>
+              </button>
+              <button
+                onClick={() => setShowManageLinksModal(false)}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

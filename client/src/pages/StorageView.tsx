@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StorageFile, OrganizationUsage } from '../types';
+import { StorageFile, OrganizationUsage, ReviewLink } from '../types';
 import { api } from '../services/api';
 import {
   Cloud,
@@ -22,6 +22,9 @@ import {
   Clock,
   AlertTriangle,
   RefreshCw,
+  Link2,
+  Eye,
+  Trash2,
 } from 'lucide-react';
 
 interface StorageViewProps {
@@ -30,6 +33,7 @@ interface StorageViewProps {
 
 export const StorageView: React.FC<StorageViewProps> = ({ onSelectAsset }) => {
   const [files, setFiles] = useState<StorageFile[]>([]);
+  const [reviewLinks, setReviewLinks] = useState<ReviewLink[]>([]);
   const [cloudStorageUrl, setCloudStorageUrl] = useState<string>(
     'https://www.jioaicloud.com/l/?u=g4hmxUTO-wgVwF-fLP9Bx-cyfJyX-vprhmiygn1LPJ50buo7GG7VSBbwMbOf04FwhIb'
   );
@@ -45,11 +49,13 @@ export const StorageView: React.FC<StorageViewProps> = ({ onSelectAsset }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [filesRes, usageRes] = await Promise.all([
+      const [filesRes, usageRes, linksRes] = await Promise.all([
         api.getStorageFiles(),
         api.getStorageUsage().catch(() => null),
+        api.getAllReviewLinks().catch(() => ({ reviewLinks: [] })),
       ]);
       setFiles(filesRes.files || []);
+      setReviewLinks(linksRes?.reviewLinks || []);
       if (filesRes.cloudStorageUrl) {
         setCloudStorageUrl(filesRes.cloudStorageUrl);
       }
@@ -60,6 +66,17 @@ export const StorageView: React.FC<StorageViewProps> = ({ onSelectAsset }) => {
       console.error('Failed to load storage files', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRevokeLink = async (linkId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to revoke this review link? Clients using it will immediately lose access.')) return;
+    try {
+      await api.revokeReviewLink(linkId);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to revoke link');
     }
   };
 
@@ -247,7 +264,7 @@ export const StorageView: React.FC<StorageViewProps> = ({ onSelectAsset }) => {
       </div>
 
       {/* Storage Metrics Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-[#111420] border border-[#202538] rounded-xl p-4">
           <span className="text-[11px] text-slate-400 block mb-1">Total Files</span>
           <span className="text-xl font-bold text-white">{files.length}</span>
@@ -264,6 +281,15 @@ export const StorageView: React.FC<StorageViewProps> = ({ onSelectAsset }) => {
           <span className="text-[11px] text-slate-400 block mb-1">Active Projects</span>
           <span className="text-xl font-bold text-emerald-400">{uniqueProjects.length}</span>
           <span className="text-[10px] text-slate-500 block mt-0.5">Organized workspaces</span>
+        </div>
+
+        <div className="bg-[#111420] border border-[#202538] rounded-xl p-4">
+          <span className="text-[11px] text-slate-400 block mb-1 flex items-center gap-1">
+            <Link2 className="w-3 h-3 text-amber-400" />
+            <span>Active Review Links</span>
+          </span>
+          <span className="text-xl font-bold text-amber-400">{reviewLinks.filter((l) => !l.revoked_at).length}</span>
+          <span className="text-[10px] text-slate-500 block mt-0.5">Shared review rooms</span>
         </div>
 
         <div className="bg-[#111420] border border-[#202538] rounded-xl p-4">
@@ -376,75 +402,139 @@ export const StorageView: React.FC<StorageViewProps> = ({ onSelectAsset }) => {
         </div>
       ) : (
         <div className="bg-[#111420] border border-[#202538] rounded-2xl overflow-hidden divide-y divide-[#1e2338]">
-          {filteredFiles.map((file) => (
-            <div
-              key={file.version_id}
-              onClick={() => onSelectAsset(file.asset_id)}
-              className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-[#141828] transition-colors cursor-pointer group"
-            >
-              {/* Left: Icon & File Info */}
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-[#0c0e15] border border-[#21263c] flex items-center justify-center shrink-0 group-hover:border-indigo-500/50 transition-colors">
-                  {getFormatIcon(file.asset_type)}
-                </div>
+          {filteredFiles.map((file) => {
+            const matchedLink = reviewLinks.find(
+              (l) => l.asset_id === file.asset_id || l.raw_token_display === file.review_token
+            );
+            const activeToken = matchedLink?.raw_token_display || file.review_token;
+            const isRevoked = Boolean(matchedLink?.revoked_at);
+            const isExpired = Boolean(matchedLink?.expires_at && new Date(matchedLink.expires_at) < new Date());
 
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-bold text-sm text-slate-100 group-hover:text-indigo-300 transition-colors truncate">
-                      {file.original_filename}
-                    </h4>
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-950/70 border border-indigo-800/40 text-indigo-300">
-                      V{file.version_number}
-                    </span>
-                    {getStatusBadge(file.asset_status)}
+            return (
+              <div
+                key={file.version_id}
+                onClick={() => onSelectAsset(file.asset_id)}
+                className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-[#141828] transition-colors cursor-pointer group"
+              >
+                {/* Left: Icon & File Info */}
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#0c0e15] border border-[#21263c] flex items-center justify-center shrink-0 group-hover:border-indigo-500/50 transition-colors">
+                    {getFormatIcon(file.asset_type)}
                   </div>
 
-                  <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 flex-wrap">
-                    <span className="text-slate-300 font-medium">{file.project_name}</span>
-                    <span>•</span>
-                    <span>Client: <strong className="text-slate-400 font-normal">{file.client_name}</strong></span>
-                    <span>•</span>
-                    <span className="font-mono text-[11px]">
-                      {((file.size_bytes || 0) / (1024 * 1024)).toFixed(1)} MB
-                    </span>
-                    <span>•</span>
-                    <span>{new Date(file.created_at).toLocaleDateString()}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-bold text-sm text-slate-100 group-hover:text-indigo-300 transition-colors truncate">
+                        {file.original_filename}
+                      </h4>
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-950/70 border border-indigo-800/40 text-indigo-300">
+                        V{file.version_number}
+                      </span>
+                      {getStatusBadge(file.asset_status)}
+
+                      {/* Review Link Active Status Badge (PRD LINK-01, LINK-08) */}
+                      {activeToken ? (
+                        isRevoked ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                            Revoked Link
+                          </span>
+                        ) : isExpired ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Expired Link
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Active Review Link</span>
+                          </span>
+                        )
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/60 text-slate-500 border border-slate-700/40">
+                          No Share Link
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 flex-wrap">
+                      <span className="text-slate-300 font-medium">{file.project_name}</span>
+                      <span>•</span>
+                      <span>Client: <strong className="text-slate-400 font-normal">{file.client_name}</strong></span>
+                      <span>•</span>
+                      <span className="font-mono text-[11px]">
+                        {((file.size_bytes || 0) / (1024 * 1024)).toFixed(1)} MB
+                      </span>
+                      <span>•</span>
+                      <span>{new Date(file.created_at).toLocaleDateString()}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Right: Actions */}
-              <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-                {file.review_token && (
+                {/* Right: Actions */}
+                <div className="flex items-center gap-2 self-end md:self-auto shrink-0 flex-wrap">
+                  {activeToken && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const url = `${window.location.origin}/review/${activeToken}`;
+                          navigator.clipboard.writeText(url);
+                          setCopiedTokenId(file.version_id);
+                          setTimeout(() => setCopiedTokenId(null), 2500);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#141724] hover:bg-[#1c2235] border border-[#23283b] text-slate-300 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+                        title="Copy Client Review Link"
+                      >
+                        {copiedTokenId === file.version_id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400 font-semibold text-[11px]">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-400" />
+                            <span className="text-[11px]">Copy Link</span>
+                          </>
+                        )}
+                      </button>
+
+                      <a
+                        href={`/review/${activeToken}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                        title="Open Client Review Room"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Preview</span>
+                      </a>
+
+                      {!isRevoked && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRevokeLink(matchedLink?.id || activeToken, e);
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 border border-transparent hover:border-rose-500/20 transition-colors cursor-pointer"
+                          title="Revoke Review Link"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   <button
-                    onClick={(e) => handleCopyReviewLink(file, e)}
-                    className="p-2 rounded-lg bg-[#141724] hover:bg-[#1c2235] border border-[#23283b] text-slate-300 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1.5"
-                    title="Copy Client Review Link"
+                    onClick={() => onSelectAsset(file.asset_id)}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
                   >
-                    {copiedTokenId === file.version_id ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 text-[11px]">Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Share2 className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-[11px] hidden sm:inline">Review Link</span>
-                      </>
-                    )}
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Open Player</span>
                   </button>
-                )}
-
-                <button
-                  onClick={() => onSelectAsset(file.asset_id)}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Open Player</span>
-                </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Asset, AssetVersion } from '../types';
+import { Project, Asset, AssetVersion, ReviewLink } from '../types';
 import { api } from '../services/api';
 import { UploadAssetModal } from '../components/UploadAssetModal';
 import { ActivityFeed } from '../components/ActivityFeed';
@@ -18,6 +18,11 @@ import {
   Activity,
   ChevronRight,
   MessageSquare,
+  Link2,
+  Copy,
+  Check,
+  Eye,
+  Trash2,
 } from 'lucide-react';
 
 interface ProjectViewProps {
@@ -30,17 +35,24 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack, onS
   const [project, setProject] = useState<Project | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'assets' | 'activity'>('assets');
+  const [reviewLinks, setReviewLinks] = useState<ReviewLink[]>([]);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'assets' | 'activity' | 'links'>('assets');
   const [loading, setLoading] = useState<boolean>(true);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
 
   const fetchProjectData = async () => {
     try {
       setLoading(true);
-      const data = await api.getProject(projectId);
-      if (data && data.project) {
-        setProject(data.project);
-        setAssets(data.assets || []);
+      const [projData, actData, linksData] = await Promise.all([
+        api.getProject(projectId),
+        api.getProjectActivity(projectId).catch(() => ({ activities: [] })),
+        api.getAllReviewLinks().catch(() => ({ reviewLinks: [] })),
+      ]);
+
+      if (projData && projData.project) {
+        setProject(projData.project);
+        setAssets(projData.assets || []);
       } else {
         setProject({
           id: projectId,
@@ -57,12 +69,38 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack, onS
         setAssets([]);
       }
 
-      const actData = await api.getProjectActivity(projectId);
       setActivities(actData?.activities || []);
+
+      // Filter links belonging to this project or its assets
+      const currentAssets = projData?.assets || [];
+      const pLinks = (linksData?.reviewLinks || []).filter(
+        (l: ReviewLink) => l.project_id === projectId || currentAssets.some((a: Asset) => a.id === l.asset_id)
+      );
+      setReviewLinks(pLinks);
     } catch (err: any) {
       console.error('Failed to load project details', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCopyLink = (link: ReviewLink) => {
+    const rawToken = link.raw_token_display || link.id;
+    const url = `${window.location.origin}/review/${rawToken}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLinkId(link.id);
+    setTimeout(() => setCopiedLinkId(null), 2500);
+  };
+
+  const handleRevokeLink = async (linkId: string) => {
+    if (!confirm('Are you sure you want to revoke this review link?')) return;
+    try {
+      await api.revokeReviewLink(linkId);
+      setReviewLinks((prev) =>
+        prev.map((l) => (l.id === linkId ? { ...l, revoked_at: new Date().toISOString() } : l))
+      );
+    } catch (e: any) {
+      alert(e.message || 'Failed to revoke link');
     }
   };
 
@@ -229,6 +267,17 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack, onS
             <span>Assets & Cuts ({assets.length})</span>
           </button>
           <button
+            onClick={() => setActiveTab('links')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
+              activeTab === 'links'
+                ? 'bg-slate-800 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Link2 className="w-3.5 h-3.5" />
+            <span>Review Links ({reviewLinks.length})</span>
+          </button>
+          <button
             onClick={() => setActiveTab('activity')}
             className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
               activeTab === 'activity'
@@ -312,6 +361,93 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack, onS
             ))}
           </div>
         )
+      ) : activeTab === 'links' ? (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl">
+          <h3 className="text-sm font-bold text-slate-100 mb-4 flex items-center gap-2">
+            <Link2 className="w-4 h-4 text-indigo-400" />
+            <span>Active Review Links for this Project</span>
+          </h3>
+
+          {reviewLinks.length === 0 ? (
+            <div className="py-12 text-center text-slate-500 text-xs">
+              No review links created for this project yet. Open an asset to generate and share client review links.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800">
+              {reviewLinks.map((link) => {
+                const isRevoked = Boolean(link.revoked_at);
+                const rawToken = link.raw_token_display || link.id;
+                const fullUrl = `${window.location.origin}/review/${rawToken}`;
+
+                return (
+                  <div
+                    key={link.id}
+                    className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="font-bold text-slate-200">
+                          {link.asset_name || 'Wedding Media Cut'}
+                        </span>
+                        {isRevoked ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                            Revoked
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono text-[11px] text-indigo-400 truncate max-w-md">
+                        {fullUrl}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleCopyLink(link)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        {copiedLinkId === link.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400 font-semibold">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Copy Link</span>
+                          </>
+                        )}
+                      </button>
+
+                      <a
+                        href={`/review/${rawToken}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Preview Room</span>
+                      </a>
+
+                      {!isRevoked && (
+                        <button
+                          onClick={() => handleRevokeLink(link.id)}
+                          className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 border border-transparent hover:border-rose-500/20 transition-colors cursor-pointer"
+                          title="Revoke Link"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl">
           <h3 className="text-sm font-bold text-slate-100 mb-4 flex items-center gap-2">

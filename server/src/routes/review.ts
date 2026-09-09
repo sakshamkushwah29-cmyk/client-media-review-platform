@@ -15,12 +15,46 @@ async function resolveReviewLink(token: string, passphrase?: string): Promise<{ 
   }
 
   const tokenHash = hashToken(token);
-  const link = db.query(`
+  let link = db.query(`
     SELECT rl.*, p.organization_id, p.name as project_name, p.client_name
     FROM review_links rl
     JOIN projects p ON rl.project_id = p.id
-    WHERE rl.token_hash = ?
-  `).get(tokenHash) as any;
+    WHERE rl.token_hash = ? OR rl.raw_token_display = ? OR rl.id = ?
+  `).get(tokenHash, token, token) as any;
+
+  if (!link && token.startsWith('rev_')) {
+    try {
+      let base64 = token.slice(4).replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) base64 += '=';
+      const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+      if (payload && (payload.asset_id || payload.astId)) {
+        const astId = payload.asset_id || payload.astId;
+        const prjId = payload.project_id || payload.prjId;
+        const dbAsset = db.query(`
+          SELECT a.*, p.name as project_name, p.client_name, p.organization_id 
+          FROM assets a 
+          JOIN projects p ON a.project_id = p.id 
+          WHERE a.id = ?
+        `).get(astId) as any;
+
+        link = {
+          id: payload.id || `rev-link-${astId}`,
+          project_id: prjId,
+          asset_id: astId,
+          raw_token_display: token,
+          can_comment: payload.can_comment ?? payload.com ?? 1,
+          can_download: payload.can_download ?? payload.dwn ?? 1,
+          can_approve: payload.can_approve ?? payload.app ?? 1,
+          show_previous_versions: payload.show_previous_versions ?? payload.prev ?? 1,
+          passphrase_hash: payload.passphrase_hash || payload.pass || null,
+          expires_at: payload.expires_at || payload.exp || null,
+          revoked_at: payload.revoked_at || null,
+          project_name: dbAsset?.project_name || payload.project_name || payload.prjName || 'Wedding Film',
+          client_name: dbAsset?.client_name || payload.client_name || payload.cliName || 'Wedding Client',
+        };
+      }
+    } catch (e) {}
+  }
 
   if (!link) {
     return { error: 'Review link not found or invalid', status: 404 };

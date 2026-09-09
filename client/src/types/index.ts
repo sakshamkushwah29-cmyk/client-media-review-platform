@@ -96,6 +96,9 @@ export interface ReviewLink {
   created_by: string;
   creator_name?: string;
   created_at: string;
+  asset_name?: string;
+  project_name?: string;
+  client_name?: string;
 }
 
 export interface Comment {
@@ -189,6 +192,8 @@ export interface StorageFile {
   client_name: string;
   drive_folder_id: string;
   review_token?: string | null;
+  review_link_id?: string | null;
+  review_link_revoked?: boolean;
 }
 
 export interface NotificationItem {

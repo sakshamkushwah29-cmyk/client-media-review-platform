@@ -6,6 +6,8 @@ import { ImagePreview } from '../components/ImagePreview';
 import { PdfPreview } from '../components/PdfPreview';
 import { CommentThread } from '../components/CommentThread';
 import { ReviewDecisionModal } from '../components/ReviewDecisionModal';
+import { useAuth } from '../context/AuthContext';
+import { getMediaBlobUrl, revokeBlobUrl } from '../services/mediaStorage';
 import {
   ChevronLeft,
   Download,
@@ -32,6 +34,7 @@ export const ClientReviewRoom: React.FC<ClientReviewRoomProps> = ({ token }) => 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
+  const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(null);
 
   // Decision modal
   const [decisionModalType, setDecisionModalType] = useState<'approved' | 'changes_requested' | null>(null);
@@ -59,6 +62,34 @@ export const ClientReviewRoom: React.FC<ClientReviewRoomProps> = ({ token }) => 
   useEffect(() => {
     fetchReview();
   }, [token]);
+
+  useEffect(() => {
+    let active = true;
+    const versionId = selectedVersion?.id;
+
+    if (versionId) {
+      getMediaBlobUrl(versionId).then((url) => {
+        if (active && url) {
+          setLocalBlobUrl(url);
+        } else if (active && data?.asset?.id) {
+          getMediaBlobUrl(data.asset.id).then((assetUrl) => {
+            if (active) setLocalBlobUrl(assetUrl || null);
+          });
+        } else if (active) {
+          setLocalBlobUrl(null);
+        }
+      });
+    } else {
+      setLocalBlobUrl(null);
+    }
+
+    return () => {
+      active = false;
+      if (versionId) {
+        revokeBlobUrl(versionId);
+      }
+    };
+  }, [selectedVersion?.id, data?.asset?.id]);
 
   const handleUnlockWithPassphrase = (e: React.FormEvent) => {
     e.preventDefault();
@@ -347,7 +378,8 @@ export const ClientReviewRoom: React.FC<ClientReviewRoomProps> = ({ token }) => 
             {asset.type === 'video' ? (
               <VideoPlayer
                 ref={playerRef}
-                src={mediaUrl}
+                src={localBlobUrl || mediaUrl}
+                fallbackSrc="/sample-video.mp4"
                 markers={videoMarkers}
                 onTimeUpdate={(t) => setCurrentPlaybackTime(t)}
                 onMarkerClick={(t) => {
@@ -355,9 +387,9 @@ export const ClientReviewRoom: React.FC<ClientReviewRoomProps> = ({ token }) => 
                 }}
               />
             ) : asset.type === 'image' ? (
-              <ImagePreview src={mediaUrl} alt={asset.name} />
+              <ImagePreview src={localBlobUrl || mediaUrl} alt={asset.name} />
             ) : asset.type === 'pdf' ? (
-              <PdfPreview src={mediaUrl} downloadUrl={downloadUrl} filename={selectedVersion.download_filename} />
+              <PdfPreview src={localBlobUrl || mediaUrl} downloadUrl={downloadUrl} filename={selectedVersion.download_filename} />
             ) : (
               <div className="p-12 text-center bg-[#11131c] rounded-2xl border border-slate-800 text-slate-400">
                 Unsupported preview format.

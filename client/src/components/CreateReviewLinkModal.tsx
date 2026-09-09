@@ -6,6 +6,9 @@ import { ReviewLink } from '../types';
 interface CreateReviewLinkModalProps {
   assetId: string;
   assetName: string;
+  projectId?: string;
+  projectName?: string;
+  clientName?: string;
   onClose: () => void;
   onCreated: (newLink: ReviewLink) => void;
 }
@@ -13,6 +16,9 @@ interface CreateReviewLinkModalProps {
 export const CreateReviewLinkModal: React.FC<CreateReviewLinkModalProps> = ({
   assetId,
   assetName,
+  projectId,
+  projectName,
+  clientName,
   onClose,
   onCreated,
 }) => {
@@ -31,6 +37,10 @@ export const CreateReviewLinkModal: React.FC<CreateReviewLinkModalProps> = ({
     try {
       setIsSubmitting(true);
       const res = await api.createReviewLink(assetId, {
+        projectId,
+        assetName,
+        projectName,
+        clientName,
         canComment,
         canDownload,
         canApprove,
@@ -39,12 +49,21 @@ export const CreateReviewLinkModal: React.FC<CreateReviewLinkModalProps> = ({
         expiresAt: expiresAt || undefined,
       });
 
-      const fullUrl = `${window.location.origin}${res.reviewLink.shareUrl}`;
+      const rawToken = res.reviewLink.raw_token_display || (res.reviewLink as any).rawToken || '';
+      const rawShare = res.reviewLink.shareUrl || `/review/${rawToken}`;
+      const fullUrl = rawShare.startsWith('http')
+        ? rawShare
+        : `${window.location.origin}${rawShare.startsWith('/') ? '' : '/'}${rawShare}`;
+
       setGeneratedLink({
-        rawToken: (res.reviewLink as any).rawToken || '',
+        rawToken,
         shareUrl: fullUrl,
       });
-      onCreated(res.reviewLink);
+      onCreated({
+        ...res.reviewLink,
+        raw_token_display: rawToken,
+        shareUrl: fullUrl,
+      });
     } catch (err: any) {
       alert(err.message || 'Failed to create review link');
     } finally {
