@@ -282,24 +282,25 @@ async function runTests() {
   assert.strictEqual(demoCmtResp.data.comments.length, 2, 'ver-1 must have 2 comments');
   console.log(`  ✅ Demo version ver-1 returned ${demoCmtResp.data.comments.length} sample comments.`);
 
-  // Test 14: Comments isolation - New cut version ver-new-999 starts with strictly 0 comments
-  console.log('\nTest 14: New cut version ver-new-999 starts with strictly 0 comments');
+  // Test 14: Comments isolation - New cut version starts with strictly 0 comments
+  const uniqueTestVerId = `ver-new-${Date.now()}`;
+  console.log(`\nTest 14: New cut version ${uniqueTestVerId} starts with strictly 0 comments`);
   const { req: newCmtReq, res: newCmtRes, getResponse: getNewCmtResp } = createMockReqRes({
     method: 'GET',
-    url: '/api/comments/version/ver-new-999',
+    url: `/api/comments/version/${uniqueTestVerId}`,
   });
   await handler(newCmtReq, newCmtRes);
   const newCmtResp = getNewCmtResp();
   assert.strictEqual(newCmtResp.statusCode, 200);
   assert.strictEqual(newCmtResp.data.comments.length, 0, 'New cut version must have strictly 0 comments');
-  console.log('  ✅ Verified new cut version ver-new-999 starts clean with 0 comments.');
+  console.log(`  ✅ Verified new cut version ${uniqueTestVerId} starts clean with 0 comments.`);
 
   // Test 15: Review room for a new cut token starts with strictly 0 comments
   console.log('\nTest 15: Review room for new cut token starts with strictly 0 comments');
   const newCutPayload = {
     id: `link-new-${Date.now()}`,
-    asset_id: 'custom-asset-brand-new',
-    project_id: 'custom-proj-brand-new',
+    asset_id: `custom-asset-${Date.now()}`,
+    project_id: `custom-proj-${Date.now()}`,
     asset_name: 'Haldi Ceremony Highlights',
     can_comment: 1,
     can_download: 1,
@@ -321,7 +322,7 @@ async function runTests() {
   console.log('\nTest 16: Posting comment on new cut saves and isolates to that cut');
   const { req: postCmtReq, res: postCmtRes, getResponse: getPostCmtResp } = createMockReqRes({
     method: 'POST',
-    url: '/api/comments/version/ver-new-999',
+    url: `/api/comments/version/${uniqueTestVerId}`,
     body: {
       body: 'Client loves the entry sequence, audio level needs +2dB',
       authorName: 'Aarav Sharma',
@@ -332,29 +333,30 @@ async function runTests() {
   const postCmtResp = getPostCmtResp();
   assert.strictEqual(postCmtResp.statusCode, 200);
   assert(postCmtResp.data?.comment?.id, 'Comment created with ID');
-  assert.strictEqual(postCmtResp.data.comment.asset_version_id, 'ver-new-999');
+  assert.strictEqual(postCmtResp.data.comment.asset_version_id, uniqueTestVerId);
 
   // Verify subsequent GET returns strictly the 1 newly added comment
   const { req: checkCmtReq, res: checkCmtRes, getResponse: getCheckCmtResp } = createMockReqRes({
     method: 'GET',
-    url: '/api/comments/version/ver-new-999',
+    url: `/api/comments/version/${uniqueTestVerId}`,
   });
   await handler(checkCmtReq, checkCmtRes);
   const checkCmtResp = getCheckCmtResp();
-  assert.strictEqual(checkCmtResp.data.comments.length, 1, 'ver-new-999 should now have exactly 1 comment');
+  assert.strictEqual(checkCmtResp.data.comments.length, 1, 'Version should now have exactly 1 comment');
   assert.strictEqual(checkCmtResp.data.comments[0].body, 'Client loves the entry sequence, audio level needs +2dB');
-  console.log('  ✅ New comment saved and retrieved exclusively on ver-new-999.');
+  console.log(`  ✅ New comment saved and retrieved exclusively on ${uniqueTestVerId}.`);
 
   // Test 17: Other new cut versions still have 0 comments (no cross-contamination)
-  console.log('\nTest 17: Other new cut versions still have strictly 0 comments');
+  const otherVerId = `ver-other-cut-${Date.now()}`;
+  console.log(`\nTest 17: Other new cut version ${otherVerId} still has strictly 0 comments`);
   const { req: otherCmtReq, res: otherCmtRes, getResponse: getOtherCmtResp } = createMockReqRes({
     method: 'GET',
-    url: '/api/comments/version/ver-other-cut-888',
+    url: `/api/comments/version/${otherVerId}`,
   });
   await handler(otherCmtReq, otherCmtRes);
   const otherCmtResp = getOtherCmtResp();
   assert.strictEqual(otherCmtResp.data.comments.length, 0, 'Other new cut version must have 0 comments');
-  console.log('  ✅ Verified no comment leakage: ver-other-cut-888 has 0 comments.');
+  console.log(`  ✅ Verified no comment leakage: ${otherVerId} has 0 comments.`);
 
   console.log('\n========================================================');
   console.log('🎉 ALL 17 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
