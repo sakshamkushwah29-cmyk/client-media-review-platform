@@ -546,7 +546,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
             return (
               <div
                 key={m.id}
-                style={{ left: `${Math.min(99, Math.max(0.5, markerPos))}%` }}
+                style={{ left: `${Math.min(100, Math.max(0, markerPos))}%` }}
                 className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 group/marker cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();

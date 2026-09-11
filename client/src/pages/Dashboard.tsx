@@ -104,11 +104,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectProject }) => {
         description: description.trim() || undefined,
       });
 
+      // Immediately prepend new project to state
+      setProjects((prev) => [res.project, ...prev.filter((p) => p.id !== res.project.id)]);
+
       setShowCreateModal(false);
       setProjectName('');
       setClientName('');
       setDescription('');
-      await fetchDashboardData();
       onSelectProject(res.project.id);
     } catch (err: any) {
       alert(err.message || 'Failed to create project');

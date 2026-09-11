@@ -15,15 +15,24 @@ const API_BASE = (import.meta as any).env?.VITE_API_URL
   : '/api';
 
 function getAuthToken(): string | null {
-  return localStorage.getItem('auth_token');
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('auth_token');
+    }
+  } catch (e) {}
+  return null;
 }
 
 export function setAuthToken(token: string | null) {
-  if (token) {
-    localStorage.setItem('auth_token', token);
-  } else {
-    localStorage.removeItem('auth_token');
-  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      if (token) {
+        localStorage.setItem('auth_token', token);
+      } else {
+        localStorage.removeItem('auth_token');
+      }
+    }
+  } catch (e) {}
 }
 
 // Fallback seed data for static deployments (e.g. Vercel without separate backend)
@@ -100,7 +109,7 @@ const DEMO_ASSETS: Record<string, Asset[]> = {
       mime_type: 'video/mp4',
       size_bytes: 7450000,
       duration_seconds: 15.2,
-      original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      original_filename: 'Wedding_Teaser_Cut_V2.mp4',
       comment_count: 2,
       open_comment_count: 1,
     },
@@ -198,7 +207,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return response.json();
 }
 
-function getStoredProjects(): Project[] {
+export function getStoredProjects(): Project[] {
   try {
     const saved = localStorage.getItem('wedding_platform_projects_v2');
     if (saved) {
@@ -209,13 +218,13 @@ function getStoredProjects(): Project[] {
   return [...DEMO_PROJECTS];
 }
 
-function saveStoredProjects(projects: Project[]) {
+export function saveStoredProjects(projects: Project[]) {
   try {
     localStorage.setItem('wedding_platform_projects_v2', JSON.stringify(projects));
   } catch (e) {}
 }
 
-function getStoredAssets(projectId: string): Asset[] {
+export function getStoredAssets(projectId: string): Asset[] {
   try {
     const saved = localStorage.getItem(`wedding_platform_assets_${projectId}`);
     if (saved) {
@@ -226,7 +235,7 @@ function getStoredAssets(projectId: string): Asset[] {
   return DEMO_ASSETS[projectId] || [];
 }
 
-function saveAsset(projectId: string, asset: Asset, version: AssetVersion) {
+export function saveAsset(projectId: string, asset: Asset, version: AssetVersion) {
   try {
     const assets = getStoredAssets(projectId);
     assets.unshift(asset);
@@ -544,51 +553,38 @@ export const api = {
 
   // Projects
   getProjects: async () => {
+    const localProjects = getStoredProjects();
     try {
       const res = await request<{ projects: Project[] }>('/projects');
       if (res?.projects && Array.isArray(res.projects)) {
-        const localProjects = getStoredProjects();
         const merged = [...res.projects];
         for (const lp of localProjects) {
           if (!merged.some((m) => m.id === lp.id)) {
             merged.push(lp);
           }
         }
+        // Write-through sync
+        saveStoredProjects(merged);
         return { projects: merged };
       }
     } catch (err) {}
-    return { projects: getStoredProjects() };
+    return { projects: localProjects };
   },
   getProject: async (id: string) => {
+    let proj: Project | null = null;
+    let fetchedAssets: Asset[] = [];
+
     try {
       const res = await request<{ project: Project; assets: Asset[] }>(`/projects/${id}`);
       if (res && res.project) {
-        const storedAssets = getStoredAssets(id);
-        const isDemo = id === 'proj-1' || id === 'demo-proj-1' || id === 'proj-2' || id === 'demo-proj-2';
-
-        if (!isDemo) {
-          // Strictly isolate non-demo projects: filter out hardcoded demo cuts (ast-1, ast-2, etc.)
-          const validAssets = (res.assets || []).filter(
-            (a) => a.project_id === id && a.id !== 'ast-1' && a.id !== 'demo-asset-1' && a.id !== 'ast-2' && a.id !== 'demo-asset-2'
-          );
-          for (const sa of storedAssets) {
-            if (!validAssets.some((va) => va.id === sa.id)) {
-              validAssets.push(sa);
-            }
-          }
-          return {
-            project: {
-              ...res.project,
-              asset_count: validAssets.length,
-            },
-            assets: validAssets,
-          };
-        }
-        return res;
+        proj = res.project;
+        fetchedAssets = res.assets || [];
       }
-    } catch (err) {
+    } catch (err) {}
+
+    if (!proj) {
       const projects = getStoredProjects();
-      const project = projects.find((p) => p.id === id) || {
+      proj = projects.find((p) => p.id === id) || {
         id,
         organization_id: 'org-wedding-studio',
         name: 'New Wedding Film',
@@ -601,17 +597,48 @@ export const api = {
         asset_count: 0,
         total_bytes: 0,
       };
-      const assets = getStoredAssets(id);
-      return { project, assets };
     }
+
+    const storedAssets = getStoredAssets(id);
+    const isDemo = id === 'proj-1' || id === 'demo-proj-1' || id === 'proj-2' || id === 'demo-proj-2';
+
+    if (!isDemo) {
+      // Strictly isolate non-demo projects: filter out hardcoded demo cuts (ast-1, ast-2, etc.)
+      const validAssets = (fetchedAssets || []).filter(
+        (a) => a.project_id === id && a.id !== 'ast-1' && a.id !== 'demo-asset-1' && a.id !== 'ast-2' && a.id !== 'demo-asset-2'
+      );
+      for (const sa of storedAssets) {
+        if (!validAssets.some((va) => va.id === sa.id)) {
+          validAssets.push(sa);
+        }
+      }
+      return {
+        project: {
+          ...proj,
+          asset_count: validAssets.length,
+        },
+        assets: validAssets,
+      };
+    }
+
+    return {
+      project: proj,
+      assets: fetchedAssets.length > 0 ? fetchedAssets : storedAssets,
+    };
   },
   createProject: async (data: { name: string; clientName: string; description?: string }) => {
+    let createdProject: Project | null = null;
     try {
-      return await request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(data) });
+      const res = await request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(data) });
+      if (res?.project) {
+        createdProject = res.project;
+      }
     } catch (err) {
       console.warn('Backend unavailable, saving project locally:', err);
-      const projects = getStoredProjects();
-      const newProject: Project = {
+    }
+
+    if (!createdProject) {
+      createdProject = {
         id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         organization_id: 'demo-org-id',
         name: data.name,
@@ -624,10 +651,14 @@ export const api = {
         asset_count: 0,
         total_bytes: 0,
       };
-      projects.unshift(newProject);
-      saveStoredProjects(projects);
-      return { project: newProject };
     }
+
+    // ALWAYS write-through persist to localStorage!
+    const projects = getStoredProjects();
+    const updated = [createdProject, ...projects.filter((p) => p.id !== createdProject!.id)];
+    saveStoredProjects(updated);
+
+    return { project: createdProject };
   },
   updateProject: async (id: string, data: Partial<Project>) => {
     try {
@@ -839,6 +870,10 @@ export const api = {
       res = { asset, currentVersion };
     }
 
+    if (res?.asset && res?.currentVersion) {
+      saveAsset(projectId, res.asset, res.currentVersion);
+    }
+
     // Persist blob to IndexedDB for zero-latency local playback
     if (file && res?.currentVersion?.id) {
       onProgress?.(90);
@@ -871,20 +906,36 @@ export const api = {
     try {
       return await request<{ asset: Asset; currentVersion: AssetVersion; versions: AssetVersion[] }>(`/assets/${id}`);
     } catch (err) {
-      const allAssets = Object.values(DEMO_ASSETS).flat();
-      const asset = allAssets.find(a => a.id === id) || DEMO_ASSETS['demo-proj-1'][0];
-      const version: AssetVersion = {
+      // Check stored assets across all stored projects first
+      const allProjects = getStoredProjects();
+      let foundAsset: Asset | undefined;
+      for (const p of allProjects) {
+        const assets = getStoredAssets(p.id);
+        const a = assets.find((ast) => ast.id === id);
+        if (a) {
+          foundAsset = a;
+          break;
+        }
+      }
+      const asset = foundAsset || DEMO_ASSETS['demo-proj-1'][0];
+      let versions: AssetVersion[] = [];
+      try {
+        const vSaved = localStorage.getItem(`wedding_platform_ver_${asset.id}`);
+        if (vSaved) versions = JSON.parse(vSaved);
+      } catch (e) {}
+
+      const version: AssetVersion = versions[0] || {
         id: asset.current_version_id || 'demo-ver-1',
         asset_id: asset.id,
         version_number: asset.version_number || 1,
-        original_filename: asset.original_filename || 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
-        download_filename: asset.original_filename || 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        original_filename: asset.original_filename || 'Wedding_Teaser_Cut_V2.mp4',
+        download_filename: asset.original_filename || 'Wedding_Teaser_Cut_V2.mp4',
         mime_type: asset.mime_type || 'video/mp4',
         size_bytes: asset.size_bytes || 7450000,
         duration_seconds: asset.duration_seconds || 15.2,
         created_at: asset.created_at,
       };
-      return { asset, currentVersion: version, versions: [version] };
+      return { asset, currentVersion: version, versions: versions.length > 0 ? versions : [version] };
     }
   },
   uploadNewVersion: async (
@@ -949,6 +1000,19 @@ export const api = {
       res = { asset, version };
     }
 
+    if (res?.version) {
+      try {
+        const vKey = `wedding_platform_ver_${assetId}`;
+        const existingVerStr = localStorage.getItem(vKey);
+        let existingVers: AssetVersion[] = [];
+        if (existingVerStr) existingVers = JSON.parse(existingVerStr);
+        if (!existingVers.some((v) => v.id === res.version.id)) {
+          existingVers.unshift(res.version);
+          localStorage.setItem(vKey, JSON.stringify(existingVers));
+        }
+      } catch (e) {}
+    }
+
     if (file && res?.version?.id) {
       try {
         await saveMediaBlob(res.version.id, file);
@@ -995,10 +1059,10 @@ export const api = {
       }
     }
 
-    const prjId = parentProject?.id || data.projectId || 'demo-proj-1';
-    const astName = targetAsset?.name || data.assetName || 'Wedding Media Cut';
-    const prjName = parentProject?.name || data.projectName || 'Wedding Film';
-    const cliName = parentProject?.client_name || data.clientName || 'Wedding Client';
+    const prjId = data.projectId || parentProject?.id || 'proj-1';
+    const astName = data.assetName || targetAsset?.name || 'Wedding Media Cut';
+    const prjName = data.projectName || parentProject?.name || 'Wedding Film';
+    const cliName = data.clientName || parentProject?.client_name || 'Wedding Client';
     const linkId = `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
     const tokenPayload = {
@@ -1362,8 +1426,8 @@ export const api = {
         id: 'demo-ver-1',
         asset_id: asset.id,
         version_number: 2,
-        original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
-        download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+        original_filename: 'Wedding_Teaser_Cut_V2.mp4',
+        download_filename: 'Wedding_Teaser_Cut_V2.mp4',
         mime_type: 'video/mp4',
         size_bytes: 7450000,
         duration_seconds: 15.2,

@@ -75,8 +75,8 @@ const assetsStore = {
       mime_type: 'video/mp4',
       size_bytes: 7450000,
       duration_seconds: 15.2,
-      original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
-      download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+      original_filename: 'Wedding_Teaser_Cut_V2.mp4',
+      download_filename: 'Wedding_Teaser_Cut_V2.mp4',
       comment_count: 2,
       open_comment_count: 1,
     },
@@ -130,8 +130,8 @@ const versionsStore = {
     id: 'ver-1',
     asset_id: 'ast-1',
     version_number: 2,
-    original_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
-    download_filename: 'WhatsApp Video 2026-07-29 at 15.25.53.mp4',
+    original_filename: 'Wedding_Teaser_Cut_V2.mp4',
+    download_filename: 'Wedding_Teaser_Cut_V2.mp4',
     mime_type: 'video/mp4',
     size_bytes: 7450000,
     duration_seconds: 15.2,
@@ -224,7 +224,63 @@ function persistLinks() {
   } catch (e) {}
 }
 
+const PROJECTS_PERSIST_FILE = '/tmp/wedding_projects.json';
+
+function loadPersistedProjects() {
+  try {
+    if (fs.existsSync(PROJECTS_PERSIST_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PROJECTS_PERSIST_FILE, 'utf8'));
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          const idx = projectsStore.findIndex((p) => p.id === item.id);
+          if (idx === -1) {
+            projectsStore.push(item);
+          } else {
+            projectsStore[idx] = { ...projectsStore[idx], ...item };
+          }
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+function persistProjects() {
+  try {
+    fs.writeFileSync(PROJECTS_PERSIST_FILE, JSON.stringify(projectsStore), 'utf8');
+  } catch (e) {}
+}
+
+const ASSETS_PERSIST_FILE = '/tmp/wedding_assets.json';
+
+function loadPersistedAssets() {
+  try {
+    if (fs.existsSync(ASSETS_PERSIST_FILE)) {
+      const data = JSON.parse(fs.readFileSync(ASSETS_PERSIST_FILE, 'utf8'));
+      if (data && typeof data === 'object') {
+        for (const [projId, assets] of Object.entries(data)) {
+          if (Array.isArray(assets)) {
+            if (!assetsStore[projId]) assetsStore[projId] = [];
+            for (const a of assets) {
+              if (!assetsStore[projId].some((existing) => existing.id === a.id)) {
+                assetsStore[projId].push(a);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+function persistAssets() {
+  try {
+    fs.writeFileSync(ASSETS_PERSIST_FILE, JSON.stringify(assetsStore), 'utf8');
+  } catch (e) {}
+}
+
 // Initial load
+loadPersistedProjects();
+loadPersistedAssets();
 loadPersistedLinks();
 
 function decodeReviewToken(token) {
@@ -764,6 +820,9 @@ export default async function handler(req, res) {
   // PROJECTS: GET /api/projects, POST /api/projects
   // --------------------------------------------------------------------------
   if (url.endsWith('/projects') || url.endsWith('/projects/')) {
+    loadPersistedProjects();
+    loadPersistedAssets();
+
     if (method === 'POST') {
       const { name, clientName, description } = body || {};
       const newProject = {
@@ -782,6 +841,8 @@ export default async function handler(req, res) {
       projectsStore.unshift(newProject);
       // Newly created projects MUST have empty assets array!
       assetsStore[newProject.id] = [];
+      persistProjects();
+      persistAssets();
       return res.status(200).json({ project: newProject });
     }
 
@@ -857,6 +918,9 @@ export default async function handler(req, res) {
         p.total_bytes = (p.total_bytes || 0) + asset.size_bytes;
       }
 
+      persistProjects();
+      persistAssets();
+
       return res.status(200).json({ asset, currentVersion: version });
     }
 
@@ -883,6 +947,8 @@ export default async function handler(req, res) {
     }
 
     // GET project: Find in store or return project with EMPTY assets if new!
+    loadPersistedProjects();
+    loadPersistedAssets();
     const effectiveProjId = projId === 'demo-proj-1' ? 'proj-1' : projId === 'demo-proj-2' ? 'proj-2' : projId;
     let project = projectsStore.find((p) => p.id === projId || p.id === effectiveProjId);
     if (!project) {
@@ -1007,6 +1073,7 @@ export default async function handler(req, res) {
       versionsStore[verId] = ver;
       asset.current_version_id = verId;
       asset.version_number = ver.version_number;
+      persistAssets();
 
       return res.status(200).json({ asset, version: ver });
     }
