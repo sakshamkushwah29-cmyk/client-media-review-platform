@@ -80,6 +80,7 @@ export class HovodAdapter {
   async getUploadUrl(assetId: string): Promise<HovodUploadUrlResponse> {
     return this.request<HovodUploadUrlResponse>(`/v1/assets/${assetId}/upload-url`, {
       method: 'POST',
+      body: JSON.stringify({}),
     });
   }
 
@@ -89,6 +90,7 @@ export class HovodAdapter {
   async completeUpload(assetId: string): Promise<{ id: string; status: string }> {
     return this.request<{ id: string; status: string }>(`/v1/assets/${assetId}/upload-complete`, {
       method: 'POST',
+      body: JSON.stringify({}),
     });
   }
 

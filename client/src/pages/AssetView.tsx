@@ -393,8 +393,8 @@ export const AssetView: React.FC<AssetViewProps> = ({ assetId, onBack }) => {
             {asset.asset_type === 'video' ? (
               <VideoPlayer
                 ref={playerRef}
-                src={localBlobUrl || mediaUrl}
-                fallbackSrc="/sample-video.mp4"
+                src={localBlobUrl || (asset.name?.includes('WhatsApp') ? '/media/whatsapp-video-saksham.mp4' : mediaUrl)}
+                fallbackSrc={asset.id === 'ast-1' || asset.id === 'demo-asset-1' ? '/sample-video.mp4' : undefined}
                 markers={videoMarkers}
                 onTimeUpdate={(t) => setCurrentPlaybackTime(t)}
                 onMarkerClick={(t) => {

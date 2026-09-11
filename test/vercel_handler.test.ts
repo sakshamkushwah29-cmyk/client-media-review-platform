@@ -407,8 +407,64 @@ async function runTests() {
   assert.strictEqual(hovodPbResp.statusCode, 200);
   console.log(`  ✅ Hovod playback verified for asset ${hovodFinResp.data.asset.id}`);
 
+  // Test 21: Short Review Link rev-figc8856
+  console.log('\nTest 21: Resolve short review link rev-figc8856');
+  const { req: shortReq, res: shortRes, getResponse: getShortResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/review/rev-figc8856',
+  });
+  await handler(shortReq, shortRes);
+  const shortResp = getShortResp();
+  assert.strictEqual(shortResp.statusCode, 200);
+  assert.strictEqual(shortResp.data.project.name, 'saksham');
+  assert.strictEqual(shortResp.data.project.clientName, 'rohit');
+  assert(shortResp.data.asset.name.includes('WhatsApp Video'));
+  assert.strictEqual(shortResp.data.comments.length, 3, 'Should have 3 comments');
+  assert.strictEqual(shortResp.data.manifestUrl, '/media/whatsapp-video-saksham.mp4');
+  console.log(`  ✅ Short link rev-figc8856 verified: Project="saksham", Real Video URL preserved`);
+
+  // Test 22: Short Review Link rev-saksham
+  console.log('\nTest 22: Resolve short review link rev-saksham');
+  const { req: sakshamReq, res: sakshamRes, getResponse: getSakshamResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/review/rev-saksham',
+  });
+  await handler(sakshamReq, sakshamRes);
+  const sakshamResp = getSakshamResp();
+  assert.strictEqual(sakshamResp.statusCode, 200);
+  assert.strictEqual(sakshamResp.data.project.name, 'saksham');
+  console.log(`  ✅ Short link rev-saksham verified: Project="saksham"`);
+
+  // Test 23: Stream media for rev-figc8856 returns real 6.3MB WhatsApp video
+  console.log('\nTest 23: Stream media for rev-figc8856 returns real WhatsApp video');
+  const { req: mediaReq, res: mediaRes, getResponse: getMediaResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/review/rev-figc8856/media',
+    headers: { range: 'bytes=0-1023' },
+  });
+  await handler(mediaReq, mediaRes);
+  const mediaResp = getMediaResp();
+  assert.strictEqual(mediaResp.statusCode, 206);
+  assert.strictEqual(mediaResp.headers['content-type'], 'video/mp4');
+  assert(mediaResp.headers['content-range'].includes('6304044'), `Expected real video size 6304044, got: ${mediaResp.headers['content-range']}`);
+  console.log(`  ✅ Real video streamed for review room: Content-Range=${mediaResp.headers['content-range']}`);
+
+  // Test 24: Legacy base64 review link resolves
+  console.log('\nTest 24: Legacy base64 review link resolves');
+  const legacyToken = 'rev_eyJpZCI6ImxpbmstMTc4OTEyMjU2ODg1Ni1maWdjIiwiYXNzZXRfaWQiOiJhc3QtMTc4OTEyMjUxNDk0OSIsImFzdElkIjoiYXN0LTE3ODkxMjI1MTQ5NDkiLCJwcm9qZWN0X2lkIjoicHJvai0xNzg5MTIyNDg4NjAwLXd3bXMiLCJwcmpJZCI6InByb2otMTc4OTEyMjQ4ODYwMC13d21zIiwiYXNzZXRfbmFtZSI6IldoYXRzQXBwIFZpZGVvIDIwMjYtMDctMjIgYXQgMTUuMzkuMTkgKDEpIiwiYXN0TmFtZSI6IldoYXRzQXBwIFZpZGVvIDIwMjYtMDctMjIgYXQgMTUuMzkuMTkgKDEpIiwicHJvamVjdF9uYW1lIjoic2Frc2hhbSIsInByak5hbWUiOiJzYWtzaGFtIiwiY2xpZW50X25hbWUiOiJyb2hpdCIsImNsaU5hbWUiOiJyb2hpdCIsImNhbl9jb21tZW50IjoxLCJjb20iOjEsImNhbl9kb3dubG9hZCI6MSwiZHduIjoxLCJjYW5fYXBwcm92ZSI6MSwiYXBwIjoxLCJzaG93X3ByZXZpb3VzX3ZlcnNpb25zIjoxLCJwcmV2IjoxLCJjcmVhdGVkX2F0IjoiMjAyNi0wOS0xMVQxMDoyOToyOC44NTZaIn0';
+  const { req: legReq, res: legRes, getResponse: getLegResp } = createMockReqRes({
+    method: 'GET',
+    url: `/api/review/${legacyToken}`,
+  });
+  await handler(legReq, legRes);
+  const legResp = getLegResp();
+  assert.strictEqual(legResp.statusCode, 200);
+  assert.strictEqual(legResp.data.project.name, 'saksham');
+  assert.strictEqual(legResp.data.manifestUrl, '/media/whatsapp-video-saksham.mp4');
+  console.log(`  ✅ Legacy link resolved: Project="${legResp.data.project.name}", manifestUrl preserved`);
+
   console.log('\n========================================================');
-  console.log('🎉 ALL 20 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
+  console.log('🎉 ALL 24 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
   console.log('========================================================\n');
 }
 

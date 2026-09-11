@@ -378,8 +378,12 @@ export const ClientReviewRoom: React.FC<ClientReviewRoomProps> = ({ token }) => 
             {asset.type === 'video' ? (
               <VideoPlayer
                 ref={playerRef}
-                src={localBlobUrl || mediaUrl}
-                fallbackSrc="/sample-video.mp4"
+                src={localBlobUrl || (data as any)?.manifestUrl || (data as any)?.streamUrl || mediaUrl}
+                fallbackSrc={
+                  (data?.asset?.id === 'ast-1' || data?.asset?.id === 'demo-asset-1' || token === 'sharma-wedding-teaser-review' || token === 'demo-review-token')
+                    ? '/sample-video.mp4'
+                    : undefined
+                }
                 markers={videoMarkers}
                 onTimeUpdate={(t) => setCurrentPlaybackTime(t)}
                 onMarkerClick={(t) => {

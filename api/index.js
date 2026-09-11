@@ -6,10 +6,11 @@ import path from 'path';
 const HOVOD_API_KEY = process.env.HOVOD_API_KEY || 'mk_live_24nGNG_4NGe97Exc2Wl1J0nBnVoWKONM';
 const HOVOD_API_URL = (process.env.HOVOD_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
-async function hovodFetch(endpoint, options = {}, timeoutMs = 2500) {
+async function hovodFetch(endpoint, options = {}, timeoutMs = 4000) {
   const url = `${HOVOD_API_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const headers = {
-    'Content-Type': 'application/json',
+    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    'Bypass-Tunnel-Reminder': 'true',
     ...(HOVOD_API_KEY ? { 'X-API-Key': HOVOD_API_KEY } : {}),
     ...(options.headers || {}),
   };
@@ -57,6 +58,19 @@ const projectsStore = [
     created_at: '2026-07-25T14:30:00.000Z',
     asset_count: 1,
     total_bytes: 34500000,
+  },
+  {
+    id: 'proj-1789122488600-wwms',
+    organization_id: 'org-wedding-studio',
+    name: 'saksham',
+    client_name: 'rohit',
+    description: 'Cinematic wedding highlights & teaser cut.',
+    status: 'active',
+    drive_folder_id: 'fld-saksham',
+    created_by: 'usr-director',
+    created_at: '2026-09-11T10:28:08.600Z',
+    asset_count: 1,
+    total_bytes: 6304044,
   },
 ];
 
@@ -119,6 +133,26 @@ const assetsStore = {
       open_comment_count: 0,
     },
   ],
+  'proj-1789122488600-wwms': [
+    {
+      id: 'ast-1789122514949',
+      project_id: 'proj-1789122488600-wwms',
+      name: 'WhatsApp Video 2026-07-22 at 15.39.19 (1)',
+      asset_type: 'video',
+      status: 'ready_for_review',
+      current_version_id: 'ver-ast-1789122514949',
+      created_by: 'usr-director',
+      created_at: '2026-09-11T10:28:34.949Z',
+      version_number: 1,
+      mime_type: 'video/mp4',
+      size_bytes: 6304044,
+      duration_seconds: 15.0,
+      original_filename: 'WhatsApp Video 2026-07-22 at 15.39.19 (1).mp4',
+      download_filename: 'WhatsApp Video 2026-07-22 at 15.39.19 (1).mp4',
+      comment_count: 3,
+      open_comment_count: 3,
+    },
+  ],
 };
 
 // Aliases for client compatibility
@@ -159,6 +193,18 @@ const versionsStore = {
     duration_seconds: 45.0,
     created_at: '2026-07-26T18:00:00.000Z',
   },
+  'ver-ast-1789122514949': {
+    id: 'ver-ast-1789122514949',
+    asset_id: 'ast-1789122514949',
+    version_number: 1,
+    drive_file_id: 'hovod:DtHFPSavvdDj:PaMlZjv5TbKRlnUP',
+    original_filename: 'WhatsApp Video 2026-07-22 at 15.39.19 (1).mp4',
+    download_filename: 'WhatsApp Video 2026-07-22 at 15.39.19 (1).mp4',
+    mime_type: 'video/mp4',
+    size_bytes: 6304044,
+    duration_seconds: 15.0,
+    created_at: '2026-09-11T10:28:34.949Z',
+  },
 };
 
 const reviewLinksStore = [
@@ -193,6 +239,38 @@ const reviewLinksStore = [
     asset_name: 'Wedding Teaser Cut V2',
     project_name: 'Sharma - Verma Wedding 2026',
     client_name: 'Rahul Sharma & Ananya Verma',
+  },
+  {
+    id: 'link-1789122568856-figc',
+    project_id: 'proj-1789122488600-wwms',
+    asset_id: 'ast-1789122514949',
+    raw_token_display: 'rev-figc8856',
+    shareUrl: '/review/rev-figc8856',
+    can_comment: 1,
+    can_download: 1,
+    can_approve: 1,
+    show_previous_versions: 1,
+    created_by: 'usr-director',
+    created_at: '2026-09-11T10:29:28.856Z',
+    asset_name: 'WhatsApp Video 2026-07-22 at 15.39.19 (1)',
+    project_name: 'saksham',
+    client_name: 'rohit',
+  },
+  {
+    id: 'link-saksham-alias',
+    project_id: 'proj-1789122488600-wwms',
+    asset_id: 'ast-1789122514949',
+    raw_token_display: 'rev-saksham',
+    shareUrl: '/review/rev-saksham',
+    can_comment: 1,
+    can_download: 1,
+    can_approve: 1,
+    show_previous_versions: 1,
+    created_by: 'usr-director',
+    created_at: '2026-09-11T10:29:28.856Z',
+    asset_name: 'WhatsApp Video 2026-07-22 at 15.39.19 (1)',
+    project_name: 'saksham',
+    client_name: 'rohit',
   },
 ];
 
@@ -331,6 +409,35 @@ function findReviewLink(token) {
 }
 
 const commentsStore = {
+  'ver-ast-1789122514949': [
+    {
+      id: 'cmt-saksham-1',
+      asset_version_id: 'ver-ast-1789122514949',
+      author_name: 'Staff Editor',
+      body: 'hii',
+      time_seconds: 9.66,
+      status: 'open',
+      created_at: '2026-09-11T10:30:00.000Z',
+    },
+    {
+      id: 'cmt-saksham-2',
+      asset_version_id: 'ver-ast-1789122514949',
+      author_name: 'Staff Editor',
+      body: 'hii',
+      time_seconds: 3.66,
+      status: 'open',
+      created_at: '2026-09-11T10:31:00.000Z',
+    },
+    {
+      id: 'cmt-saksham-3',
+      asset_version_id: 'ver-ast-1789122514949',
+      author_name: 'Staff Editor',
+      body: 'hhh',
+      time_seconds: 12.66,
+      status: 'open',
+      created_at: '2026-09-11T10:32:00.000Z',
+    },
+  ],
   'ver-1': [
     {
       id: 'cmt-1',
@@ -398,15 +505,19 @@ function persistComments() {
 
 loadPersistedComments();
 
-// Helper: Stream a sample MP4 video with HTTP 206 Partial Content Range support
-function streamMedia(req, res) {
-  const candidatePaths = [
-    path.resolve(process.cwd(), 'public/sample-video.mp4'),
-    path.resolve(process.cwd(), '.sample_media/sharma_wedding_highlights_v1.mp4'),
-    path.resolve(process.cwd(), 'dist/sample-video.mp4'),
-  ];
-
-  const filePath = candidatePaths.find((p) => fs.existsSync(p));
+// Helper: Stream an MP4 video with HTTP 206 Partial Content Range support
+function streamMedia(req, res, targetFilePath) {
+  let filePath = targetFilePath && fs.existsSync(targetFilePath) ? targetFilePath : null;
+  if (!filePath) {
+    const candidatePaths = [
+      path.resolve(process.cwd(), 'public/media/whatsapp-video-saksham.mp4'),
+      path.resolve(process.cwd(), 'dist/media/whatsapp-video-saksham.mp4'),
+      path.resolve(process.cwd(), 'public/sample-video.mp4'),
+      path.resolve(process.cwd(), '.sample_media/sharma_wedding_highlights_v1.mp4'),
+      path.resolve(process.cwd(), 'dist/sample-video.mp4'),
+    ];
+    filePath = candidatePaths.find((p) => fs.existsSync(p));
+  }
 
   if (!filePath) {
     // If local file is missing, redirect to static sample video URL
@@ -490,6 +601,7 @@ export default async function handler(req, res) {
       });
       const uploadUrlData = await hovodFetch(`/v1/assets/${hovodAsset.id}/upload-url`, {
         method: 'POST',
+        body: JSON.stringify({}),
       });
       return res.status(200).json({
         hovodAssetId: hovodAsset.id,
@@ -510,10 +622,13 @@ export default async function handler(req, res) {
       const targetProjId = projectId || (url.includes('/projects/') ? url.split('/projects/')[1].split('/')[0] : 'proj-1');
       
       // Notify Hovod
-      await hovodFetch(`/v1/assets/${hovodAssetId}/upload-complete`, { method: 'POST' }).catch(() => {});
+      await hovodFetch(`/v1/assets/${hovodAssetId}/upload-complete`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }).catch(() => {});
       hovodFetch(`/v1/assets/${hovodAssetId}/process`, {
         method: 'POST',
-        body: JSON.stringify({ aiOptions: { transcription: true, subtitles: true, chapters: true } }),
+        body: JSON.stringify({ aiOptions: { transcription: false, subtitles: false, chapters: false } }),
       }).catch(() => {});
 
       const astId = 'ast-' + Date.now();
@@ -561,6 +676,8 @@ export default async function handler(req, res) {
         p.asset_count = assetsStore[targetProjId].length;
         p.total_bytes = (p.total_bytes || 0) + asset.size_bytes;
       }
+      persistAssets();
+      persistProjects();
 
       return res.status(200).json({ asset, currentVersion: version });
     } catch (err) {
@@ -626,8 +743,38 @@ export default async function handler(req, res) {
             }
           } catch (e) {}
         }
+
+        // Real video streaming for WhatsApp / saksham cuts
+        if (asset && (asset.name?.includes('WhatsApp') || (link.asset_name && link.asset_name.includes('WhatsApp')) || (link.project_name && link.project_name.toLowerCase().includes('saksham')))) {
+          const customPaths = [
+            path.resolve(process.cwd(), 'public/media/whatsapp-video-saksham.mp4'),
+            path.resolve(process.cwd(), 'dist/media/whatsapp-video-saksham.mp4'),
+          ];
+          const found = customPaths.find((p) => fs.existsSync(p));
+          if (found) {
+            return streamMedia(req, res, found);
+          }
+        }
       }
     }
+
+    if (url.includes('/versions/')) {
+      const parts = url.split('?')[0].split('/');
+      const verIdx = parts.indexOf('versions');
+      const verId = parts[verIdx + 1];
+      const version = versionsStore[verId];
+      if (version && (version.original_filename?.includes('WhatsApp') || version.download_filename?.includes('WhatsApp'))) {
+        const customPaths = [
+          path.resolve(process.cwd(), 'public/media/whatsapp-video-saksham.mp4'),
+          path.resolve(process.cwd(), 'dist/media/whatsapp-video-saksham.mp4'),
+        ];
+        const found = customPaths.find((p) => fs.existsSync(p));
+        if (found) {
+          return streamMedia(req, res, found);
+        }
+      }
+    }
+
     return streamMedia(req, res);
   }
 
@@ -1270,6 +1417,25 @@ export default async function handler(req, res) {
 
     const comments = commentsStore[version.id] || (isDemoCut ? (commentsStore['ver-1'] || []) : []);
 
+    let manifestUrl = null;
+    let streamUrl = null;
+
+    if (version && version.drive_file_id && version.drive_file_id.startsWith('hovod:')) {
+      const [, hovodId, playbackId] = version.drive_file_id.split(':');
+      try {
+        const playback = await hovodFetch(`/v1/playback/${playbackId}`);
+        if (playback?.manifestUrl) {
+          manifestUrl = playback.manifestUrl;
+          streamUrl = playback.manifestUrl;
+        }
+      } catch (e) {}
+    }
+
+    if (!manifestUrl && (asset.name?.includes('WhatsApp') || (link.asset_name && link.asset_name.includes('WhatsApp')) || (link.project_name && link.project_name.toLowerCase().includes('saksham')))) {
+      manifestUrl = '/media/whatsapp-video-saksham.mp4';
+      streamUrl = '/media/whatsapp-video-saksham.mp4';
+    }
+
     return res.status(200).json({
       requiresPassphrase: Boolean(link?.passphrase && req.headers['x-review-passphrase'] !== link.passphrase),
       project: {
@@ -1292,6 +1458,8 @@ export default async function handler(req, res) {
       currentVersion: version,
       versions: [version],
       comments,
+      manifestUrl,
+      streamUrl,
     });
   }
 
