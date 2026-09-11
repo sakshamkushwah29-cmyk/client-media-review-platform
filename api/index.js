@@ -6,20 +6,28 @@ import path from 'path';
 const HOVOD_API_KEY = process.env.HOVOD_API_KEY || 'mk_live_24nGNG_4NGe97Exc2Wl1J0nBnVoWKONM';
 const HOVOD_API_URL = (process.env.HOVOD_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
-async function hovodFetch(endpoint, options = {}) {
+async function hovodFetch(endpoint, options = {}, timeoutMs = 2500) {
   const url = `${HOVOD_API_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const headers = {
     'Content-Type': 'application/json',
     ...(HOVOD_API_KEY ? { 'X-API-Key': HOVOD_API_KEY } : {}),
     ...(options.headers || {}),
   };
-  const res = await fetch(url, { ...options, headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Hovod error: ${res.status}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, headers, signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Hovod error: ${res.status}`);
+    }
+    const json = await res.json();
+    return json.data !== undefined ? json.data : json;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
   }
-  const json = await res.json();
-  return json.data !== undefined ? json.data : json;
 }
 
 // In-memory data store for serverless execution
@@ -803,31 +811,36 @@ export default async function handler(req, res) {
     if (subRoute === 'assets' && method === 'POST') {
       const astId = 'ast-' + Date.now();
       const verId = 'ver-' + Date.now();
-      const filename = body?.name || 'Wedding Media Cut';
+      const filename = body?.name || body?.original_filename || 'Wedding Media Cut';
+      const mimeType = body?.mime_type || 'video/mp4';
+      const sizeBytes = body?.size_bytes ? Number(body.size_bytes) : 7450000;
+      const durationSeconds = body?.duration_seconds ? Number(body.duration_seconds) : 15.2;
+      const assetType = body?.asset_type || (mimeType.startsWith('video') ? 'video' : mimeType.startsWith('image') ? 'image' : 'other');
+
       const version = {
         id: verId,
         asset_id: astId,
         version_number: 1,
         original_filename: filename,
         download_filename: filename,
-        mime_type: 'video/mp4',
-        size_bytes: 7450000,
-        duration_seconds: 15.2,
+        mime_type: mimeType,
+        size_bytes: sizeBytes,
+        duration_seconds: durationSeconds,
         created_at: new Date().toISOString(),
       };
       const asset = {
         id: astId,
         project_id: projId,
         name: filename,
-        asset_type: 'video',
+        asset_type: assetType,
         status: 'ready_for_review',
         current_version_id: verId,
         created_by: 'usr-director',
         created_at: new Date().toISOString(),
         version_number: 1,
-        mime_type: 'video/mp4',
-        size_bytes: 7450000,
-        duration_seconds: 15.2,
+        mime_type: mimeType,
+        size_bytes: sizeBytes,
+        duration_seconds: durationSeconds,
         original_filename: filename,
         download_filename: filename,
         comment_count: 0,
@@ -975,16 +988,20 @@ export default async function handler(req, res) {
 
     if (subRoute === 'versions' && method === 'POST') {
       const verId = 'ver-' + Date.now();
-      const filename = body?.name || `${asset.name} V${(asset.version_number || 1) + 1}`;
+      const filename = body?.name || body?.original_filename || `${asset.name} V${(asset.version_number || 1) + 1}`;
+      const mimeType = body?.mime_type || 'video/mp4';
+      const sizeBytes = body?.size_bytes ? Number(body.size_bytes) : 7450000;
+      const durationSeconds = body?.duration_seconds ? Number(body.duration_seconds) : 15.2;
+
       const ver = {
         id: verId,
         asset_id: astId,
         version_number: (asset.version_number || 1) + 1,
         original_filename: filename,
         download_filename: filename,
-        mime_type: 'video/mp4',
-        size_bytes: 7450000,
-        duration_seconds: 15.2,
+        mime_type: mimeType,
+        size_bytes: sizeBytes,
+        duration_seconds: durationSeconds,
         created_at: new Date().toISOString(),
       };
       versionsStore[verId] = ver;

@@ -54,8 +54,9 @@ export const UploadVersionModal: React.FC<UploadVersionModalProps> = ({
       const formData = new FormData();
       formData.append('file', file);
 
-      setUploadProgress(50);
-      const res = await api.uploadNewVersion(assetId, formData);
+      const res = await api.uploadNewVersion(assetId, formData, (percent) => {
+        setUploadProgress(percent);
+      });
       setUploadProgress(100);
 
       onSuccess(res.asset, res.version);

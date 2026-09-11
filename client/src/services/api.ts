@@ -659,8 +659,8 @@ export const api = {
     onProgress?: (percent: number) => void
   ): Promise<{ asset: Asset; currentVersion: AssetVersion } | null> => {
     try {
-      // 1. Request upload intent
-      const intent = await request<{
+      // 1. Request upload intent (with short timeout in case Hovod is offline/unreachable)
+      const intentPromise = request<{
         hovodAssetId: string;
         playbackId: string;
         uploadUrl: string;
@@ -677,6 +677,13 @@ export const api = {
         }),
       });
 
+      // Race with a 3-second timeout so it never hangs
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Hovod connection timeout')), 3000)
+      );
+
+      const intent = await Promise.race([intentPromise, timeoutPromise]);
+
       if (!intent || !intent.uploadUrl) {
         throw new Error('No upload URL returned from Hovod');
       }
@@ -689,8 +696,8 @@ export const api = {
 
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable && onProgress) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            onProgress(percent);
+            const percent = Math.round((event.loaded / event.total) * 90);
+            onProgress(Math.min(90, Math.max(10, percent)));
           }
         };
 
@@ -705,6 +712,8 @@ export const api = {
         xhr.onerror = () => reject(new Error('Hovod direct upload network error'));
         xhr.send(file);
       });
+
+      onProgress?.(95);
 
       // 3. Finalize asset in media platform & start transcode
       const finalized = await request<{ asset: Asset; currentVersion: AssetVersion }>(
@@ -724,6 +733,7 @@ export const api = {
         }
       );
 
+      onProgress?.(100);
       return finalized;
     } catch (err) {
       console.warn('Hovod direct upload unavailable, continuing with standard storage:', err);
@@ -741,7 +751,7 @@ export const api = {
     const name = (formData.get('name') as string) || file?.name || 'Wedding Media Cut';
     const isVideo = !file || file.type.startsWith('video') || name.endsWith('.mp4') || name.endsWith('.mov');
 
-    // If file is a video, attempt direct Hovod upload first
+    // 1. If file is a video, attempt direct Hovod upload first
     if (file && isVideo) {
       try {
         const hovodResult = await api.uploadToHovod(projectId, file, name, onProgress);
@@ -758,15 +768,39 @@ export const api = {
       }
     }
 
+    // 2. Standard upload flow with fast progress and payload guard
+    onProgress?.(25);
+    const isLargeFile = file && file.size > 4 * 1024 * 1024; // > 4MB exceeds Vercel 4.5MB limit
     let res: { asset: Asset; currentVersion: AssetVersion };
 
     try {
-      res = await request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
-        method: 'POST',
-        body: formData,
-      });
+      if (isLargeFile) {
+        // Send metadata only to bypass Vercel 4.5MB payload limit
+        onProgress?.(50);
+        res = await request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            asset_type: isVideo ? 'video' : 'image',
+            mime_type: file.type || 'video/mp4',
+            size_bytes: file.size,
+            duration_seconds: isVideo ? 24.0 : 0,
+            original_filename: file.name,
+          }),
+        });
+        onProgress?.(80);
+      } else {
+        onProgress?.(50);
+        res = await request<{ asset: Asset; currentVersion: AssetVersion }>(`/projects/${projectId}/assets`, {
+          method: 'POST',
+          body: formData,
+        });
+        onProgress?.(80);
+      }
     } catch (err) {
       console.warn('Backend unavailable, storing asset locally:', err);
+      onProgress?.(60);
       const assetId = `ast-${Date.now()}`;
       const versionId = `ver-${Date.now()}`;
       const isImage = file?.type.startsWith('image') || name.endsWith('.jpg') || name.endsWith('.png');
@@ -775,8 +809,8 @@ export const api = {
         id: versionId,
         asset_id: assetId,
         version_number: 1,
-        original_filename: name,
-        download_filename: name,
+        original_filename: file?.name || name,
+        download_filename: file?.name || name,
         mime_type: file?.type || (isVideo ? 'video/mp4' : isImage ? 'image/jpeg' : 'application/octet-stream'),
         size_bytes: file?.size || 15400000,
         duration_seconds: isVideo ? 24.0 : 0,
@@ -796,7 +830,7 @@ export const api = {
         mime_type: currentVersion.mime_type,
         size_bytes: currentVersion.size_bytes,
         duration_seconds: currentVersion.duration_seconds,
-        original_filename: name,
+        original_filename: currentVersion.original_filename,
         comment_count: 0,
         open_comment_count: 0,
       };
@@ -807,12 +841,14 @@ export const api = {
 
     // Persist blob to IndexedDB for zero-latency local playback
     if (file && res?.currentVersion?.id) {
+      onProgress?.(90);
       try {
         await saveMediaBlob(res.currentVersion.id, file);
         await saveMediaBlob(res.asset.id, file);
       } catch (e) {
         console.warn('Could not cache file in IndexedDB:', e);
       }
+      onProgress?.(100);
     }
 
     return res;
@@ -851,15 +887,40 @@ export const api = {
       return { asset, currentVersion: version, versions: [version] };
     }
   },
-  uploadNewVersion: async (assetId: string, formData: FormData) => {
+  uploadNewVersion: async (
+    assetId: string,
+    formData: FormData,
+    onProgress?: (percent: number) => void
+  ) => {
     const file = formData.get('file') as File | null;
+    const isLargeFile = file && file.size > 4 * 1024 * 1024;
+    onProgress?.(25);
+
     let res: { asset: Asset; version: AssetVersion };
 
     try {
-      res = await request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
-        method: 'POST',
-        body: formData,
-      });
+      if (isLargeFile) {
+        onProgress?.(50);
+        res = await request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: file.name,
+            original_filename: file.name,
+            mime_type: file.type || 'video/mp4',
+            size_bytes: file.size,
+            duration_seconds: 24.0,
+          }),
+        });
+        onProgress?.(80);
+      } else {
+        onProgress?.(50);
+        res = await request<{ asset: Asset; version: AssetVersion }>(`/assets/${assetId}/versions`, {
+          method: 'POST',
+          body: formData,
+        });
+        onProgress?.(80);
+      }
     } catch (err) {
       const name = file?.name || 'Updated Cut V2';
       const versionId = `ver-${Date.now()}`;
