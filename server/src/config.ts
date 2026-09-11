@@ -12,4 +12,6 @@ export const CONFIG = {
   GOOGLE_DRIVE_API_KEY: process.env.GOOGLE_DRIVE_API_KEY || '',
   GOOGLE_DRIVE_SERVICE_ACCOUNT: process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT || '',
   APP_URL: process.env.APP_URL || 'http://localhost:5173',
+  HOVOD_API_KEY: process.env.HOVOD_API_KEY || 'mk_live_24nGNG_4NGe97Exc2Wl1J0nBnVoWKONM',
+  HOVOD_API_URL: process.env.HOVOD_API_URL || 'http://localhost:3000',
 };

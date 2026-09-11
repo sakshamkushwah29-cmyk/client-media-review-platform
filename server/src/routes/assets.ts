@@ -6,6 +6,7 @@ import fs from 'fs';
 import { db } from '../db';
 import { requireStaffAuth, AuthRequest } from '../middleware/auth';
 import { driveAdapter } from '../storage/driveAdapter';
+import { hovodAdapter } from '../storage/hovodAdapter';
 import { logActivity } from '../utils/activity';
 import { generateReviewToken, hashToken, hashPassword } from '../utils/tokens';
 
@@ -562,6 +563,20 @@ router.get('/assets/:id/versions/:versionId/media', requireStaffAuth, async (req
       return res.status(404).json({ error: 'Asset version not found' });
     }
 
+    if (version.drive_file_id && version.drive_file_id.startsWith('hovod:')) {
+      const parts = version.drive_file_id.split(':');
+      const hovodId = parts[1];
+      const playbackId = parts[2];
+      const playback = await hovodAdapter.getPlaybackInfo(playbackId);
+      if (playback?.manifestUrl) {
+        return res.redirect(302, playback.manifestUrl);
+      }
+      const downloadUrl = await hovodAdapter.getDownloadUrl(hovodId);
+      if (downloadUrl) {
+        return res.redirect(302, downloadUrl);
+      }
+    }
+
     const range = req.headers.range;
     const streamData = await driveAdapter.getFileStream(version.drive_file_id, range);
 
@@ -579,6 +594,150 @@ router.get('/assets/:id/versions/:versionId/media', requireStaffAuth, async (req
     if (!res.headersSent) {
       return res.status(500).json({ error: err.message || 'Failed to stream media' });
     }
+  }
+});
+
+// 10. Hovod Video Infrastructure Endpoints
+router.get('/hovod/config', (_req, res) => {
+  return res.json({
+    isConfigured: hovodAdapter.isConfigured(),
+    apiUrl: hovodAdapter.getApiUrl(),
+  });
+});
+
+router.post('/projects/:projectId/assets/hovod-intent', requireStaffAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { title, filename } = req.body;
+    const orgId = req.user!.organizationId;
+
+    if (!hovodAdapter.isConfigured()) {
+      return res.status(503).json({ error: 'Hovod is not configured' });
+    }
+
+    const project = db.query(`SELECT * FROM projects WHERE id = ? AND organization_id = ?`).get(projectId, orgId) as any;
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const assetTitle = title?.trim() || filename || 'Wedding Video Cut';
+    const hovodAsset = await hovodAdapter.createAsset(assetTitle);
+    const uploadUrlData = await hovodAdapter.getUploadUrl(hovodAsset.id);
+
+    return res.json({
+      hovodAssetId: hovodAsset.id,
+      playbackId: hovodAsset.playbackId,
+      uploadUrl: uploadUrlData.uploadUrl,
+      sourceKey: uploadUrlData.sourceKey,
+      method: uploadUrlData.method || 'PUT',
+    });
+  } catch (err: any) {
+    console.error('Hovod intent error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to initialize Hovod upload' });
+  }
+});
+
+router.post('/projects/:projectId/assets/hovod-finalize', requireStaffAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { hovodAssetId, playbackId, title, filename, mimeType, sizeBytes, durationSeconds } = req.body;
+    const orgId = req.user!.organizationId;
+    const userId = req.user!.id;
+
+    const project = db.query(`SELECT * FROM projects WHERE id = ? AND organization_id = ?`).get(projectId, orgId) as any;
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    await hovodAdapter.completeUpload(hovodAssetId);
+    hovodAdapter.processAsset(hovodAssetId).catch(() => {});
+
+    const assetId = crypto.randomUUID();
+    const versionId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const assetName = title?.trim() || filename || 'Wedding Video Cut';
+    const driveFileId = `hovod:${hovodAssetId}:${playbackId}`;
+
+    db.run(`
+      INSERT INTO assets (id, project_id, name, asset_type, status, current_version_id, created_by, created_at)
+      VALUES (?, ?, ?, 'video', 'ready_for_review', ?, ?, ?)
+    `, [assetId, projectId, assetName, versionId, userId, now]);
+
+    db.run(`
+      INSERT INTO asset_versions (
+        id, asset_id, version_number, drive_file_id, original_filename,
+        download_filename, mime_type, size_bytes, duration_seconds,
+        uploaded_by, created_at
+      ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      versionId,
+      assetId,
+      driveFileId,
+      filename || `${assetName}.mp4`,
+      filename || `${assetName}.mp4`,
+      mimeType || 'video/mp4',
+      sizeBytes || 0,
+      durationSeconds || 0,
+      userId,
+      now,
+    ]);
+
+    logActivity({
+      organizationId: orgId,
+      projectId,
+      actorUserId: userId,
+      actorName: req.user!.fullName,
+      eventType: 'asset_uploaded',
+      objectId: assetId,
+      metadata: { assetName, hovodAssetId, playbackId },
+    });
+
+    const newAsset = db.query(`SELECT * FROM assets WHERE id = ?`).get(assetId);
+    const newVersion = db.query(`SELECT * FROM asset_versions WHERE id = ?`).get(versionId);
+
+    return res.status(201).json({ asset: newAsset, currentVersion: newVersion });
+  } catch (err: any) {
+    console.error('Hovod finalize error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to finalize Hovod asset' });
+  }
+});
+
+router.get('/assets/:id/playback', async (req, res) => {
+  try {
+    const assetId = req.params.id;
+    const asset = db.query(`SELECT * FROM assets WHERE id = ?`).get(assetId) as any;
+    if (!asset) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    const version = db.query(`SELECT * FROM asset_versions WHERE id = ?`).get(asset.current_version_id) as any;
+    if (!version) {
+      return res.status(404).json({ error: 'Asset version not found' });
+    }
+
+    if (version.drive_file_id && version.drive_file_id.startsWith('hovod:')) {
+      const parts = version.drive_file_id.split(':');
+      const hovodId = parts[1];
+      const playbackId = parts[2];
+      const playback = await hovodAdapter.getPlaybackInfo(playbackId);
+      if (playback) {
+        return res.json({
+          playbackId,
+          hovodAssetId: hovodId,
+          manifestUrl: playback.manifestUrl,
+          thumbnailUrl: playback.thumbnailUrl,
+          playerUrl: playback.playerUrl,
+          durationSec: playback.durationSec || version.duration_seconds,
+        });
+      }
+    }
+
+    return res.json({
+      manifestUrl: null,
+      streamUrl: `/api/assets/${assetId}/versions/${version.id}/media`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to get playback info' });
   }
 });
 

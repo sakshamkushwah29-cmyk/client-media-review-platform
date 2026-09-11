@@ -19,6 +19,7 @@
     "canvas-confetti": "^1.9.4",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "hls.js": "^1.7.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.42.0",
     "multer": "^2.3.0",

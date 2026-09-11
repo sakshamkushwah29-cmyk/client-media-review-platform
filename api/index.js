@@ -2,6 +2,26 @@
 import fs from 'fs';
 import path from 'path';
 
+// Hovod Video Infrastructure Config
+const HOVOD_API_KEY = process.env.HOVOD_API_KEY || 'mk_live_24nGNG_4NGe97Exc2Wl1J0nBnVoWKONM';
+const HOVOD_API_URL = (process.env.HOVOD_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
+
+async function hovodFetch(endpoint, options = {}) {
+  const url = `${HOVOD_API_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(HOVOD_API_KEY ? { 'X-API-Key': HOVOD_API_KEY } : {}),
+    ...(options.headers || {}),
+  };
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Hovod error: ${res.status}`);
+  }
+  const json = await res.json();
+  return json.data !== undefined ? json.data : json;
+}
+
 // In-memory data store for serverless execution
 const projectsStore = [
   {
@@ -387,6 +407,134 @@ export default async function handler(req, res) {
   }
 
   // --------------------------------------------------------------------------
+  // HOVOD VIDEO INFRASTRUCTURE ENDPOINTS
+  // --------------------------------------------------------------------------
+  if (url.includes('/hovod/config')) {
+    return res.status(200).json({
+      isConfigured: Boolean(HOVOD_API_KEY),
+      apiUrl: HOVOD_API_URL,
+    });
+  }
+
+  if (url.includes('/hovod-intent')) {
+    try {
+      const { title, filename } = body || {};
+      const assetTitle = title?.trim() || filename || 'Wedding Video Cut';
+      const hovodAsset = await hovodFetch('/v1/assets', {
+        method: 'POST',
+        body: JSON.stringify({ title: assetTitle }),
+      });
+      const uploadUrlData = await hovodFetch(`/v1/assets/${hovodAsset.id}/upload-url`, {
+        method: 'POST',
+      });
+      return res.status(200).json({
+        hovodAssetId: hovodAsset.id,
+        playbackId: hovodAsset.playbackId,
+        uploadUrl: uploadUrlData.uploadUrl,
+        sourceKey: uploadUrlData.sourceKey,
+        method: uploadUrlData.method || 'PUT',
+      });
+    } catch (err) {
+      console.error('Hovod intent error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to create Hovod upload intent' });
+    }
+  }
+
+  if (url.includes('/hovod-finalize')) {
+    try {
+      const { hovodAssetId, playbackId, title, filename, mimeType, sizeBytes, durationSeconds, projectId } = body || {};
+      const targetProjId = projectId || (url.includes('/projects/') ? url.split('/projects/')[1].split('/')[0] : 'proj-1');
+      
+      // Notify Hovod
+      await hovodFetch(`/v1/assets/${hovodAssetId}/upload-complete`, { method: 'POST' }).catch(() => {});
+      hovodFetch(`/v1/assets/${hovodAssetId}/process`, {
+        method: 'POST',
+        body: JSON.stringify({ aiOptions: { transcription: true, subtitles: true, chapters: true } }),
+      }).catch(() => {});
+
+      const astId = 'ast-' + Date.now();
+      const verId = 'ver-' + Date.now();
+      const name = title?.trim() || filename || 'Wedding Video Cut';
+      const driveFileId = `hovod:${hovodAssetId}:${playbackId}`;
+
+      const version = {
+        id: verId,
+        asset_id: astId,
+        version_number: 1,
+        drive_file_id: driveFileId,
+        original_filename: filename || `${name}.mp4`,
+        download_filename: filename || `${name}.mp4`,
+        mime_type: mimeType || 'video/mp4',
+        size_bytes: sizeBytes || 7450000,
+        duration_seconds: durationSeconds || 24.0,
+        created_at: new Date().toISOString(),
+      };
+
+      const asset = {
+        id: astId,
+        project_id: targetProjId,
+        name,
+        asset_type: 'video',
+        status: 'ready_for_review',
+        current_version_id: verId,
+        created_by: 'usr-director',
+        created_at: new Date().toISOString(),
+        version_number: 1,
+        mime_type: version.mime_type,
+        size_bytes: version.size_bytes,
+        duration_seconds: version.duration_seconds,
+        original_filename: version.original_filename,
+        comment_count: 0,
+        open_comment_count: 0,
+      };
+
+      if (!assetsStore[targetProjId]) assetsStore[targetProjId] = [];
+      assetsStore[targetProjId].unshift(asset);
+      versionsStore[verId] = version;
+
+      const p = projectsStore.find((proj) => proj.id === targetProjId);
+      if (p) {
+        p.asset_count = assetsStore[targetProjId].length;
+        p.total_bytes = (p.total_bytes || 0) + asset.size_bytes;
+      }
+
+      return res.status(200).json({ asset, currentVersion: version });
+    } catch (err) {
+      console.error('Hovod finalize error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to finalize Hovod asset' });
+    }
+  }
+
+  if (url.includes('/playback')) {
+    const parts = url.split('?')[0].split('/');
+    const astIndex = parts.indexOf('assets');
+    if (astIndex !== -1) {
+      const astId = parts[astIndex + 1];
+      const allAssets = Object.values(assetsStore).flat();
+      const asset = allAssets.find((a) => a.id === astId);
+      const version = asset ? (versionsStore[asset.current_version_id] || Object.values(versionsStore).find((v) => v.asset_id === astId)) : null;
+      if (version && version.drive_file_id && version.drive_file_id.startsWith('hovod:')) {
+        const [, hovodId, playbackId] = version.drive_file_id.split(':');
+        try {
+          const playback = await hovodFetch(`/v1/playback/${playbackId}`);
+          return res.status(200).json({
+            playbackId,
+            hovodAssetId: hovodId,
+            manifestUrl: playback.manifestUrl,
+            thumbnailUrl: playback.thumbnailUrl,
+            playerUrl: playback.playerUrl,
+            durationSec: playback.durationSec || version.duration_seconds,
+          });
+        } catch (e) {}
+      }
+    }
+    return res.status(200).json({
+      manifestUrl: null,
+      streamUrl: '/sample-video.mp4',
+    });
+  }
+
+  // --------------------------------------------------------------------------
   // MEDIA STREAMING: /api/review/:token/media & /api/assets/:id/versions/:verId/media
   // --------------------------------------------------------------------------
   if (url.includes('/media')) {
@@ -400,6 +548,20 @@ export default async function handler(req, res) {
       }
       if (link && link.expires_at && new Date(link.expires_at) < new Date()) {
         return res.status(403).json({ error: 'This review link has expired.' });
+      }
+      if (link && link.asset_id) {
+        const allAssets = Object.values(assetsStore).flat();
+        const asset = allAssets.find((a) => a.id === link.asset_id);
+        const version = asset ? (versionsStore[asset.current_version_id] || Object.values(versionsStore).find((v) => v.asset_id === asset.id)) : null;
+        if (version && version.drive_file_id && version.drive_file_id.startsWith('hovod:')) {
+          const [, hovodId, playbackId] = version.drive_file_id.split(':');
+          try {
+            const playback = await hovodFetch(`/v1/playback/${playbackId}`);
+            if (playback?.manifestUrl) {
+              return res.redirect(302, playback.manifestUrl);
+            }
+          } catch (e) {}
+        }
       }
     }
     return streamMedia(req, res);

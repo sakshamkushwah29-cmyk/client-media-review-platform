@@ -651,9 +651,113 @@ export const api = {
     }
   },
 
+  // Hovod direct upload helper with progress
+  uploadToHovod: async (
+    projectId: string,
+    file: File,
+    name?: string,
+    onProgress?: (percent: number) => void
+  ): Promise<{ asset: Asset; currentVersion: AssetVersion } | null> => {
+    try {
+      // 1. Request upload intent
+      const intent = await request<{
+        hovodAssetId: string;
+        playbackId: string;
+        uploadUrl: string;
+        sourceKey: string;
+        method: string;
+      }>(`/projects/${projectId}/assets/hovod-intent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: name || file.name,
+          filename: file.name,
+          mimeType: file.type || 'video/mp4',
+          sizeBytes: file.size,
+        }),
+      });
+
+      if (!intent || !intent.uploadUrl) {
+        throw new Error('No upload URL returned from Hovod');
+      }
+
+      // 2. Direct upload to Hovod storage with progress tracking
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(intent.method || 'PUT', intent.uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && onProgress) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Hovod direct upload failed with status ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Hovod direct upload network error'));
+        xhr.send(file);
+      });
+
+      // 3. Finalize asset in media platform & start transcode
+      const finalized = await request<{ asset: Asset; currentVersion: AssetVersion }>(
+        `/projects/${projectId}/assets/hovod-finalize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            hovodAssetId: intent.hovodAssetId,
+            playbackId: intent.playbackId,
+            title: name || file.name,
+            filename: file.name,
+            mimeType: file.type || 'video/mp4',
+            sizeBytes: file.size,
+          }),
+        }
+      );
+
+      return finalized;
+    } catch (err) {
+      console.warn('Hovod direct upload unavailable, continuing with standard storage:', err);
+      return null;
+    }
+  },
+
   // Assets
-  uploadAsset: async (projectId: string, formData: FormData) => {
+  uploadAsset: async (
+    projectId: string,
+    formData: FormData,
+    onProgress?: (percent: number) => void
+  ) => {
     const file = formData.get('file') as File | null;
+    const name = (formData.get('name') as string) || file?.name || 'Wedding Media Cut';
+    const isVideo = !file || file.type.startsWith('video') || name.endsWith('.mp4') || name.endsWith('.mov');
+
+    // If file is a video, attempt direct Hovod upload first
+    if (file && isVideo) {
+      try {
+        const hovodResult = await api.uploadToHovod(projectId, file, name, onProgress);
+        if (hovodResult && hovodResult.asset) {
+          saveAsset(projectId, hovodResult.asset, hovodResult.currentVersion);
+          try {
+            await saveMediaBlob(hovodResult.currentVersion.id, file);
+            await saveMediaBlob(hovodResult.asset.id, file);
+          } catch (e) {}
+          return hovodResult;
+        }
+      } catch (e) {
+        console.warn('Hovod direct upload failed, falling back:', e);
+      }
+    }
+
     let res: { asset: Asset; currentVersion: AssetVersion };
 
     try {
@@ -663,10 +767,8 @@ export const api = {
       });
     } catch (err) {
       console.warn('Backend unavailable, storing asset locally:', err);
-      const name = (formData.get('name') as string) || file?.name || 'Wedding Media Cut';
       const assetId = `ast-${Date.now()}`;
       const versionId = `ver-${Date.now()}`;
-      const isVideo = !file || file.type.startsWith('video') || name.endsWith('.mp4') || name.endsWith('.mov');
       const isImage = file?.type.startsWith('image') || name.endsWith('.jpg') || name.endsWith('.png');
 
       const currentVersion: AssetVersion = {
@@ -714,6 +816,20 @@ export const api = {
     }
 
     return res;
+  },
+
+  getAssetPlayback: async (assetId: string) => {
+    try {
+      return await request<{
+        manifestUrl?: string | null;
+        streamUrl?: string;
+        playbackId?: string;
+        thumbnailUrl?: string;
+        durationSec?: number;
+      }>(`/assets/${assetId}/playback`);
+    } catch {
+      return { manifestUrl: null, streamUrl: `/api/assets/${assetId}/versions/current/media` };
+    }
   },
   getAsset: async (id: string) => {
     try {

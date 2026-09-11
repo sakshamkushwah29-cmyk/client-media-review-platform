@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
+import Hls from 'hls.js';
 import {
   Play,
   Pause,
@@ -99,12 +100,73 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   // Playback src & fallback management
   const [currentSrc, setCurrentSrc] = useState<string>(src);
   const [hasTriedFallback, setHasTriedFallback] = useState<boolean>(false);
+  const hlsRef = useRef<Hls | null>(null);
 
   useEffect(() => {
     setCurrentSrc(src);
     setHasTriedFallback(false);
     setError(null);
   }, [src]);
+
+  // Configure HLS.js or native playback whenever currentSrc changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !currentSrc) return;
+
+    const isHls = currentSrc.includes('.m3u8') || currentSrc.includes('/playback/');
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(currentSrc);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsLoading(false);
+        setError(null);
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.warn('HLS network error, recovering...', data);
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.warn('HLS media error, recovering...', data);
+              hls.recoverMediaError();
+              break;
+            default:
+              console.error('Fatal HLS error, destroying instance...', data);
+              hls.destroy();
+              handleError();
+              break;
+          }
+        }
+      });
+    } else {
+      // Native HLS (Safari) or standard MP4 video
+      video.src = currentSrc;
+      video.load();
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [currentSrc]);
 
   // Authoritative playback state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -378,7 +440,6 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       >
         <video
           ref={videoRef}
-          src={currentSrc}
           poster={poster}
           className="w-full h-full max-h-[78vh] object-contain"
           playsInline

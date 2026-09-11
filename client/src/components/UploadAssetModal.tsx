@@ -65,8 +65,10 @@ export const UploadAssetModal: React.FC<UploadAssetModalProps> = ({
       formData.append('file', file);
       if (assetName) formData.append('name', assetName.trim());
 
-      setUploadProgress(40);
-      const res = await api.uploadAsset(projectId, formData);
+      setUploadProgress(10);
+      const res = await api.uploadAsset(projectId, formData, (percent) => {
+        setUploadProgress(percent);
+      });
       setUploadProgress(100);
 
       onSuccess(res.asset, res.currentVersion);
@@ -161,7 +163,7 @@ export const UploadAssetModal: React.FC<UploadAssetModalProps> = ({
           {isUploading && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-slate-400">
-                <span>Uploading to Google Drive vault...</span>
+                <span>Uploading to Hovod video infrastructure...</span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">

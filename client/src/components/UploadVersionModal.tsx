@@ -145,7 +145,7 @@ export const UploadVersionModal: React.FC<UploadVersionModalProps> = ({
           {isUploading && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-slate-400">
-                <span>Saving to Google Drive...</span>
+                <span>Uploading revision to video infrastructure...</span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">

@@ -358,8 +358,57 @@ async function runTests() {
   assert.strictEqual(otherCmtResp.data.comments.length, 0, 'Other new cut version must have 0 comments');
   console.log(`  ✅ Verified no comment leakage: ${otherVerId} has 0 comments.`);
 
+  // Test 18: Hovod Config Endpoint
+  console.log('\nTest 18: Hovod Config Endpoint returns valid configuration');
+  const { req: hovodCfgReq, res: hovodCfgRes, getResponse: getHovodCfgResp } = createMockReqRes({
+    method: 'GET',
+    url: '/api/hovod/config',
+  });
+  await handler(hovodCfgReq, hovodCfgRes);
+  const hovodCfgResp = getHovodCfgResp();
+  assert.strictEqual(hovodCfgResp.statusCode, 200);
+  assert.strictEqual(hovodCfgResp.data.isConfigured, true, 'Hovod must be configured');
+  assert(hovodCfgResp.data.apiUrl, 'Hovod API URL must be present');
+  console.log(`  ✅ Hovod config verified: isConfigured=${hovodCfgResp.data.isConfigured}, apiUrl=${hovodCfgResp.data.apiUrl}`);
+
+  // Test 19: Hovod Finalize registers Asset & Version with hovod: prefix
+  console.log('\nTest 19: Hovod Finalize registers Asset & Version');
+  const testHovodAssetId = 'hovod-test-ast-99';
+  const testPlaybackId = 'hovod-test-pb-99';
+  const { req: hovodFinReq, res: hovodFinRes, getResponse: getHovodFinResp } = createMockReqRes({
+    method: 'POST',
+    url: `/api/projects/${newProjectId}/assets/hovod-finalize`,
+    body: {
+      hovodAssetId: testHovodAssetId,
+      playbackId: testPlaybackId,
+      title: 'Cinematic Teaser 4K Hovod Cut',
+      filename: 'wedding_teaser_4k.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: 120500000,
+      durationSeconds: 65.5,
+    },
+  });
+  await handler(hovodFinReq, hovodFinRes);
+  const hovodFinResp = getHovodFinResp();
+  assert.strictEqual(hovodFinResp.statusCode, 200);
+  assert(hovodFinResp.data?.asset?.id, 'Asset created');
+  assert.strictEqual(hovodFinResp.data.asset.name, 'Cinematic Teaser 4K Hovod Cut');
+  assert.strictEqual(hovodFinResp.data.currentVersion.drive_file_id, `hovod:${testHovodAssetId}:${testPlaybackId}`);
+  console.log(`  ✅ Hovod asset finalized: ID=${hovodFinResp.data.asset.id}, drive_file_id=${hovodFinResp.data.currentVersion.drive_file_id}`);
+
+  // Test 20: Asset Playback Endpoint for Hovod asset
+  console.log('\nTest 20: Asset Playback endpoint resolves Hovod asset');
+  const { req: hovodPbReq, res: hovodPbRes, getResponse: getHovodPbResp } = createMockReqRes({
+    method: 'GET',
+    url: `/api/assets/${hovodFinResp.data.asset.id}/playback`,
+  });
+  await handler(hovodPbReq, hovodPbRes);
+  const hovodPbResp = getHovodPbResp();
+  assert.strictEqual(hovodPbResp.statusCode, 200);
+  console.log(`  ✅ Hovod playback verified for asset ${hovodFinResp.data.asset.id}`);
+
   console.log('\n========================================================');
-  console.log('🎉 ALL 17 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
+  console.log('🎉 ALL 20 SERVERLESS HANDLER VERIFICATION TESTS PASSED!');
   console.log('========================================================\n');
 }
 
